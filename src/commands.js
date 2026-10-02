@@ -53,6 +53,9 @@ async function sendReply(client, chatId, text) {
  * Manejador principal de mensajes entrantes
  */
 async function handleMessage(msg, client) {
+    // Si el mensaje fue enviado por el propio bot, ignorar inmediatamente
+    if (msg.fromMe) return;
+
     const rawBody = (msg.body || '').trim();
     if (!rawBody) return;
 
