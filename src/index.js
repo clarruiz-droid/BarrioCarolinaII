@@ -12,6 +12,8 @@ console.log('====================================================');
 // Inicializar la base de datos local
 db.initDatabase();
 
+const puppeteerExecutablePath = process.env.PUPPETEER_EXECUTABLE_PATH || (process.platform === 'linux' ? '/usr/bin/chromium-browser' : undefined);
+
 // Configuración del cliente de WhatsApp con persistencia de sesión
 const client = new Client({
     authStrategy: new LocalAuth({
@@ -19,6 +21,7 @@ const client = new Client({
     }),
     puppeteer: {
         headless: true,
+        executablePath: puppeteerExecutablePath,
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
