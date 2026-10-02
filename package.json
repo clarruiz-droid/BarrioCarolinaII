@@ -4,7 +4,8 @@
   "description": "Bot de WhatsApp para gestión de quiniela, reserva de números y control de pagos en Barrio Carolina II",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "postinstall": "node scripts/patch-wwebjs.js"
   },
   "keywords": [
     "whatsapp",
