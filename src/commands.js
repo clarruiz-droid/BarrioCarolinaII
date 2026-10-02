@@ -2,8 +2,39 @@ const config = require('./config');
 const db = require('./db');
 const scheduler = require('./scheduler');
 
+// Almacenamiento en memoria de las sesiones y pasos de cada usuario
+const userSessions = {};
+
 /**
- * Obtiene la información del remitente (número telefónico y ID de chat serializado)
+ * Obtiene o crea la sesión de un usuario
+ */
+function getSession(userId) {
+    if (!userSessions[userId]) {
+        userSessions[userId] = {
+            step: 'IDLE',
+            tempData: {},
+            lastActivity: Date.now()
+        };
+    }
+    // Si pasaron más de 10 minutos de inactividad, reiniciar a IDLE
+    if (Date.now() - userSessions[userId].lastActivity > 10 * 60 * 1000) {
+        userSessions[userId].step = 'IDLE';
+        userSessions[userId].tempData = {};
+    }
+    userSessions[userId].lastActivity = Date.now();
+    return userSessions[userId];
+}
+
+function resetSession(userId) {
+    userSessions[userId] = {
+        step: 'IDLE',
+        tempData: {},
+        lastActivity: Date.now()
+    };
+}
+
+/**
+ * Obtiene la información del remitente
  */
 async function getSenderInfo(msg) {
     let rawId = msg.author || (msg.fromMe ? (msg.from.includes('@g.us') ? msg.to : msg.from) : msg.from) || '';
@@ -17,15 +48,12 @@ async function getSenderInfo(msg) {
             phone = contact.number || contact.id.user || phone;
         }
     } catch {
-        // Usar fallback con el ID crudo
+        // Fallback
     }
 
     return { phone, serializedId };
 }
 
-/**
- * Verifica si el remitente es un administrador
- */
 function isAdmin(phone) {
     if (!config.ADMIN_PHONES || config.ADMIN_PHONES.length === 0) {
         return true;
@@ -33,9 +61,6 @@ function isAdmin(phone) {
     return config.ADMIN_PHONES.some(admin => phone.endsWith(admin) || admin.endsWith(phone));
 }
 
-/**
- * Envía un mensaje privado al remitente de forma segura
- */
 async function sendPrivate(client, targetId, text) {
     try {
         let dest = targetId;
@@ -51,15 +76,15 @@ async function sendPrivate(client, targetId, text) {
 }
 
 /**
- * Manejador principal de comandos
+ * Manejador principal de mensajes
  */
 async function handleMessage(msg, client) {
-    const body = (msg.body || '').trim();
-    if (!body.startsWith(config.PREFIX)) return;
+    const rawBody = (msg.body || '').trim();
+    if (!rawBody) return;
 
-    const args = body.slice(config.PREFIX.length).trim().split(/\s+/);
-    const command = args.shift().toLowerCase();
+    const normalizedBody = rawBody.toUpperCase();
     const { phone: senderPhone, serializedId } = await getSenderInfo(msg);
+    const session = getSession(serializedId);
 
     let isGroup = false;
     let currentGroupId = null;
@@ -74,166 +99,322 @@ async function handleMessage(msg, client) {
         currentGroupId = msg.from.includes('@g.us') ? msg.from : msg.to;
     }
 
-    // Filtro: Si es un grupo, solo atender en GRUPO_ID
+    // Filtro de grupo: solo atender en GRUPO_ID si es un grupo
     if (isGroup) {
-        if (command === 'idgrupo' || command === 'grupo' || command === 'chatid') {
+        if (rawBody.toLowerCase() === '!idgrupo') {
             await cmdIdGrupo(msg);
             return;
         }
-
         if (config.GRUPO_ID && currentGroupId !== config.GRUPO_ID) {
-            return; // Ignorar silenciosamente otros grupos
+            return; // Ignorar otros grupos
         }
     }
 
-    try {
-        switch (command) {
-            case 'ayuda':
-            case 'help':
-            case 'comandos':
-                await cmdAyuda(msg, senderPhone, isGroup, client);
-                break;
+    // 1. PALABRA CLAVE "SORTEO" -> Despliega el menú principal
+    if (normalizedBody === 'SORTEO' || normalizedBody === '!SORTEO' || normalizedBody === '!MENU') {
+        session.step = 'MENU';
+        session.tempData = {};
 
-            case 'elegir':
-            case 'reserva':
-            case 'reservar':
-            case 'numero':
-                await cmdElegir(msg, args, senderPhone, serializedId, isGroup, client);
-                break;
+        const menuText = buildMainMenu(senderPhone);
 
-            case 'libres':
-            case 'disponibles':
-                await cmdLibres(msg, senderPhone, serializedId, isGroup, client);
-                break;
-
-            case 'misnumeros':
-            case 'minumero':
-            case 'mis':
-                await cmdMisNumeros(msg, senderPhone, serializedId, isGroup, client);
-                break;
-
-            case 'alias':
-            case 'pago':
-            case 'cbu':
-            case 'datos':
-                await cmdDatosPago(msg, serializedId, isGroup, client);
-                break;
-
-            case 'idgrupo':
-            case 'grupo':
-            case 'chatid':
-                await cmdIdGrupo(msg);
-                break;
-
-            case 'pagado':
-            case 'confirmar':
-                if (!isAdmin(senderPhone)) {
-                    await msg.reply('⛔ Este comando solo puede ser utilizado por administradores.');
-                    return;
-                }
-                await cmdPagado(msg, args, senderPhone, isGroup, client);
-                break;
-
-            case 'liberar':
-            case 'cancelar':
-                if (!isAdmin(senderPhone)) {
-                    await msg.reply('⛔ Este comando solo puede ser utilizado por administradores.');
-                    return;
-                }
-                await cmdLiberar(msg, args);
-                break;
-
-            case 'pendientes':
-            case 'deudores':
-                if (!isAdmin(senderPhone)) {
-                    await msg.reply('⛔ Este comando solo puede ser utilizado por administradores.');
-                    return;
-                }
-                await cmdPendientes(msg, serializedId, isGroup, client);
-                break;
-
-            case 'resumen':
-            case 'balance':
-            case 'estado':
-                if (!isAdmin(senderPhone)) {
-                    await msg.reply('⛔ Este comando solo puede ser utilizado por administradores.');
-                    return;
-                }
-                await cmdResumen(msg, serializedId, isGroup, client);
-                break;
-
-            case 'tablero':
-            case 'lista':
-                if (!isAdmin(senderPhone)) {
-                    await msg.reply('⛔ Este comando solo puede ser utilizado por administradores.');
-                    return;
-                }
-                await cmdTablero(msg, serializedId, isGroup, client);
-                break;
-
-            case 'anuncio':
-            case 'recordatorio':
-            case 'difundir':
-                if (!isAdmin(senderPhone)) {
-                    await msg.reply('⛔ Este comando solo puede ser utilizado por administradores.');
-                    return;
-                }
-                await cmdAnuncio(msg, args, client);
-                break;
-
-            default:
-                break;
+        if (isGroup) {
+            await msg.reply('👋 ¡Hola! Te enviamos el *Menú del Sorteo* por mensaje privado para que elijas cómodamente 📲');
+            await sendPrivate(client, serializedId, menuText);
+        } else {
+            await msg.reply(menuText);
         }
-    } catch (error) {
-        console.error(`[Error ejecutando comando !${command}]:`, error);
-        await msg.reply('⚠️ Ocurrió un error al procesar tu solicitud. Por favor intenta nuevamente.');
+        return;
+    }
+
+    // 2. SI EL USUARIO ESTÁ DENTRO DE UN FLUJO DE MENÚ (Solo en chat privado o mensaje directo)
+    if (!isGroup && session.step !== 'IDLE') {
+        const handled = await handleConversationFlow(msg, rawBody, session, senderPhone, serializedId, client);
+        if (handled) return;
+    }
+
+    // 3. COMANDOS DIRECTOS CON PREFIJO "!" (Para quienes prefieran escribir directo)
+    if (rawBody.startsWith(config.PREFIX)) {
+        const args = rawBody.slice(config.PREFIX.length).trim().split(/\s+/);
+        const command = args.shift().toLowerCase();
+        await handleDirectCommand(command, args, msg, senderPhone, serializedId, isGroup, client);
     }
 }
 
 // -------------------------------------------------------------
-// IMPLEMENTACIÓN DE COMANDOS PÚBLICOS
+// FLUJO CONVERSACIONAL PASO A PASO (MENÚ)
+// -------------------------------------------------------------
+
+function buildMainMenu(phone) {
+    let text = `🎲 *${config.EVENTO_NOMBRE}* 🎲\n\n`;
+    text += `Por favor responde con el *número* de la opción que deseas:\n\n`;
+    text += `1️⃣ 🎟️ *Elegir / Reservar un número*\n`;
+    text += `2️⃣ 📋 *Ver números disponibles*\n`;
+    text += `3️⃣ 🔍 *Consultar mis números y pagos*\n`;
+    text += `4️⃣ 💳 *Datos para transferir (Alias/CBU)*\n`;
+    
+    if (isAdmin(phone)) {
+        text += `5️⃣ 👑 *Menú de Administrador*\n`;
+    }
+
+    text += `0️⃣ ❌ *Salir / Cancelar*`;
+    return text;
+}
+
+function buildAdminMenu() {
+    let text = `👑 *MENÚ DE ADMINISTRADOR* 👑\n\n`;
+    text += `Elige una opción:\n`;
+    text += `1️⃣ ✅ *Confirmar pago de un número*\n`;
+    text += `2️⃣ ♻️ *Liberar un número*\n`;
+    text += `3️⃣ ⏳ *Ver reservas pendientes de pago*\n`;
+    text += `4️⃣ 📊 *Ver balance y recaudación*\n`;
+    text += `5️⃣ 📋 *Ver tablero completo*\n`;
+    text += `0️⃣ 🔙 *Volver al menú principal*`;
+    return text;
+}
+
+async function handleConversationFlow(msg, text, session, senderPhone, serializedId, client) {
+    const input = text.trim();
+
+    // Opción para cancelar en cualquier momento
+    if (input === '0' || input.toLowerCase() === 'cancelar' || input.toLowerCase() === 'salir') {
+        resetSession(serializedId);
+        await msg.reply('👋 Menú cerrado. Escribe *SORTEO* cuando quieras volver a ingresar.');
+        return true;
+    }
+
+    switch (session.step) {
+        // Menú Principal
+        case 'MENU':
+            if (input === '1') {
+                session.step = 'WAITING_NUMBER';
+                await msg.reply(
+                    `🔢 *PASO 1 de 2:*\n\n` +
+                    `Escribe el *número* que deseas elegir (por ejemplo: \`042\`):\n\n` +
+                    `*(Escribe 0 para cancelar)*`
+                );
+                return true;
+            } else if (input === '2') {
+                await cmdLibres(msg, senderPhone, serializedId, false, client);
+                await msg.reply(`\nEscribe *1* si quieres reservar un número ahora, o *0* para salir.`);
+                return true;
+            } else if (input === '3') {
+                await cmdMisNumeros(msg, senderPhone, serializedId, false, client);
+                return true;
+            } else if (input === '4') {
+                await cmdDatosPago(msg, serializedId, false, client);
+                return true;
+            } else if (input === '5' && isAdmin(senderPhone)) {
+                session.step = 'ADMIN_MENU';
+                await msg.reply(buildAdminMenu());
+                return true;
+            } else {
+                await msg.reply(`⚠️ Opción no válida.\nPor favor escribe un número del menú (1, 2, 3, 4 o 0 para salir):`);
+                return true;
+            }
+
+        // Paso 1: Eligiendo número
+        case 'WAITING_NUMBER': {
+            const num = db.normalizeNumber(input);
+            if (!num) {
+                await msg.reply(`❌ Número inválido. Debe ser entre \`${String(config.NUMERO_MIN).padStart(config.DIGITOS_PAD, '0')}\` y \`${config.NUMERO_MAX}\`.\nIntenta con otro número (o 0 para cancelar):`);
+                return true;
+            }
+
+            const item = db.getNumber(num);
+            if (!item || item.estado !== 'LIBRE') {
+                const ocupadoPor = item && item.vecino ? ` por *${item.vecino} (${item.casa})*` : '';
+                await msg.reply(`❌ El número *${num}* ya no está disponible${ocupadoPor}.\n\nPor favor escribe otro número (o 0 para cancelar):`);
+                return true;
+            }
+
+            // Guardar número temporalmente y pedir Nombre y Casa
+            session.tempData.numero = num;
+            session.step = 'WAITING_NAME_HOUSE';
+            await msg.reply(
+                `✅ ¡El número *${num}* está libre!\n\n` +
+                `👤 *PASO 2 de 2:*\n` +
+                `Escribe tu *Nombre y Número de Casa*:\n` +
+                `*(Ejemplo: \`Carlos Gomez Casa 18\`)*`
+            );
+            return true;
+        }
+
+        // Paso 2: Guardando Nombre y Casa
+        case 'WAITING_NAME_HOUSE': {
+            if (input.length < 3) {
+                await msg.reply(`⚠️ Por favor escribe tu nombre completo y número de casa (ej: \`Juan Perez Casa 12\`):`);
+                return true;
+            }
+
+            const parts = input.split(/\s+/);
+            const casa = parts.pop();
+            const vecino = parts.join(' ') || casa;
+
+            const result = db.reserveNumber(session.tempData.numero, vecino, casa, senderPhone);
+            resetSession(serializedId);
+
+            if (!result.success) {
+                await msg.reply(`❌ ${result.message}`);
+                return true;
+            }
+
+            const confirmacion = 
+                `🎉 ¡Felicitaciones *${vecino}* (*${casa}*)!\n\n` +
+                `🟡 Reservaste el número: *${result.numero}*\n` +
+                `💰 *Valor:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')}\n\n` +
+                `🏦 *Datos para transferir:*\n` +
+                `• *Alias:* \`${config.DATOS_PAGO.alias}\`\n` +
+                `• *CBU:* \`${config.DATOS_PAGO.cbu}\`\n` +
+                `• *Titular:* ${config.DATOS_PAGO.titular}\n` +
+                `• *Banco:* ${config.DATOS_PAGO.banco}\n\n` +
+                `⚠️ *Importante:* Envía el comprobante de transferencia al administrador dentro de las *${config.HORAS_LIMITE_PAGO} hs* para confirmar tu jugada. ¡Muchas gracias!`;
+
+            await msg.reply(confirmacion);
+
+            // Si hay un grupo configurado, anunciar brevemente la reserva en el grupo
+            if (config.GRUPO_ID) {
+                try {
+                    await client.sendMessage(
+                        config.GRUPO_ID,
+                        `🎟️ *Nueva reserva:* El vecino *${vecino}* (*${casa}*) acaba de reservar el número *${result.numero}*.`
+                    );
+                } catch (e) {
+                    console.error('[Error avisando al grupo]:', e);
+                }
+            }
+            return true;
+        }
+
+        // Submenú de Administrador
+        case 'ADMIN_MENU':
+            if (input === '1') {
+                session.step = 'ADMIN_WAITING_PAY';
+                await msg.reply(`Escribe el número a confirmar como *PAGADO* (ej: \`042\`):`);
+                return true;
+            } else if (input === '2') {
+                session.step = 'ADMIN_WAITING_RELEASE';
+                await msg.reply(`Escribe el número a *LIBERAR* (ej: \`042\`):`);
+                return true;
+            } else if (input === '3') {
+                await cmdPendientes(msg, serializedId, false, client);
+                return true;
+            } else if (input === '4') {
+                await cmdResumen(msg, serializedId, false, client);
+                return true;
+            } else if (input === '5') {
+                await cmdTablero(msg, serializedId, false, client);
+                return true;
+            } else if (input === '0') {
+                session.step = 'MENU';
+                await msg.reply(buildMainMenu(senderPhone));
+                return true;
+            }
+            break;
+
+        case 'ADMIN_WAITING_PAY': {
+            const res = db.confirmPayment(input, senderPhone);
+            resetSession(serializedId);
+            if (!res.success) {
+                await msg.reply(`❌ ${res.message}`);
+            } else {
+                await msg.reply(`✅ Pago confirmado para el número *${res.numero}* (${res.item.vecino} - ${res.item.casa}).`);
+                if (config.GRUPO_ID) {
+                    await client.sendMessage(config.GRUPO_ID, `🎉 *¡Pago confirmado!* Número *${res.numero}* de *${res.item.vecino}* (*${res.item.casa}*) 🟢 PAGADO.`);
+                }
+            }
+            return true;
+        }
+
+        case 'ADMIN_WAITING_RELEASE': {
+            const res = db.releaseNumber(input);
+            resetSession(serializedId);
+            if (!res.success) {
+                await msg.reply(`❌ ${res.message}`);
+            } else {
+                await msg.reply(`♻️ Número *${res.numero}* liberado y disponible nuevamente.`);
+            }
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// -------------------------------------------------------------
+// MANEJADOR DE COMANDOS DIRECTOS (Para usuarios avanzados)
+// -------------------------------------------------------------
+
+async function handleDirectCommand(command, args, msg, senderPhone, serializedId, isGroup, client) {
+    switch (command) {
+        case 'ayuda':
+        case 'help':
+            await cmdAyuda(msg, senderPhone, isGroup, client);
+            break;
+
+        case 'elegir':
+            await cmdElegir(msg, args, senderPhone, serializedId, isGroup, client);
+            break;
+
+        case 'libres':
+            await cmdLibres(msg, senderPhone, serializedId, isGroup, client);
+            break;
+
+        case 'misnumeros':
+            await cmdMisNumeros(msg, senderPhone, serializedId, isGroup, client);
+            break;
+
+        case 'alias':
+        case 'pago':
+            await cmdDatosPago(msg, serializedId, isGroup, client);
+            break;
+
+        case 'idgrupo':
+            await cmdIdGrupo(msg);
+            break;
+
+        case 'pagado':
+            if (isAdmin(senderPhone)) await cmdPagado(msg, args, senderPhone, isGroup, client);
+            break;
+
+        case 'liberar':
+            if (isAdmin(senderPhone)) await cmdLiberar(msg, args);
+            break;
+
+        case 'pendientes':
+            if (isAdmin(senderPhone)) await cmdPendientes(msg, serializedId, isGroup, client);
+            break;
+
+        case 'resumen':
+            if (isAdmin(senderPhone)) await cmdResumen(msg, serializedId, isGroup, client);
+            break;
+
+        case 'anuncio':
+            if (isAdmin(senderPhone)) await cmdAnuncio(msg, args, client);
+            break;
+    }
+}
+
+// -------------------------------------------------------------
+// FUNCIONES AUXILIARES
 // -------------------------------------------------------------
 
 async function cmdAyuda(msg, senderPhone, isGroup, client) {
     let text = `🎲 *${config.EVENTO_NOMBRE}* 🎲\n\n`;
-    text += `*Comandos para vecinos:*\n`;
-    text += `• *!elegir <número> <Nombre> <Casa>* : Reservar un número (Ej: \`!elegir 042 Juan Casa 15\`)\n`;
-    text += `• *!libres* : Ver la lista de números disponibles\n`;
-    text += `• *!misnumeros* : Ver tus números reservados y estado de pago\n`;
-    text += `• *!alias* : Datos para realizar la transferencia\n`;
-    text += `• *!ayuda* : Mostrar este menú\n`;
-
-    if (isAdmin(senderPhone)) {
-        text += `\n👑 *Comandos de Administrador:*\n`;
-        text += `• *!pagado <número>* : Confirmar pago de un número\n`;
-        text += `• *!liberar <número>* : Liberar un número reservado\n`;
-        text += `• *!pendientes* : Listar reservas sin pagar\n`;
-        text += `• *!resumen* : Balance y recaudación general\n`;
-        text += `• *!tablero* : Listado completo de todos los números\n`;
-        text += `• *!anuncio [texto]* : Enviar un comunicado al grupo\n`;
-        text += `• *!idgrupo* : Ver el identificador de este chat\n`;
-    }
-
+    text += `Para ver el menú interactivo, escribe: *SORTEO*\n\n`;
+    text += `*O escribe el número de opción:* \`1\` para elegir número, \`2\` para ver disponibles, \`3\` para tus números, \`4\` para datos de pago.`;
     await msg.reply(text);
 }
 
 async function cmdElegir(msg, args, senderPhone, serializedId, isGroup, client) {
     if (args.length < 3) {
-        await msg.reply(
-            `⚠️ *Formato incorrecto.*\n\n` +
-            `Por favor escribe:\n` +
-            `👉 *!elegir <número> <Nombre> <Casa>*\n\n` +
-            `*Ejemplo:* \`!elegir 042 Carlos Gomez Casa 18\``
-        );
+        await msg.reply(`⚠️ Escribe: \`!elegir <número> <Nombre> <Casa>\` o simplemente escribe *SORTEO* para usar el menú guiado.`);
         return;
     }
-
     const numInput = args[0];
     const casa = args.pop();
     const vecino = args.slice(1).join(' ');
 
     const result = db.reserveNumber(numInput, vecino, casa, senderPhone);
-
     if (!result.success) {
         await msg.reply(`❌ ${result.message}`);
         return;
@@ -248,14 +429,10 @@ async function cmdElegir(msg, args, senderPhone, serializedId, isGroup, client) 
         `• *CBU:* \`${config.DATOS_PAGO.cbu}\`\n` +
         `• *Titular:* ${config.DATOS_PAGO.titular}\n` +
         `• *Banco:* ${config.DATOS_PAGO.banco}\n\n` +
-        `⚠️ *Importante:* Envía el comprobante de transferencia al administrador dentro de las *${config.HORAS_LIMITE_PAGO} hs* para confirmar tu jugada.`;
+        `⚠️ Envía el comprobante dentro de las *${config.HORAS_LIMITE_PAGO} hs*.`;
 
     if (isGroup) {
-        await msg.reply(
-            `🎉 ¡Felicitaciones *${vecino}* (*${casa}*)!\n` +
-            `🟡 Reservaste con éxito el número: *${result.numero}*\n\n` +
-            `📲 *Te enviamos los datos de pago por mensaje privado.*`
-        );
+        await msg.reply(`🎉 ¡Felicitaciones *${vecino}* (*${casa}*)!\n🟡 Reservaste el número: *${result.numero}*. Te enviamos los datos de pago por privado 📲`);
         await sendPrivate(client, serializedId, datosPagoMsg);
     } else {
         await msg.reply(datosPagoMsg);
@@ -267,22 +444,15 @@ async function cmdLibres(msg, senderPhone, serializedId, isGroup, client) {
     const total = config.NUMERO_MAX - config.NUMERO_MIN + 1;
 
     if (libres.length === 0) {
-        await msg.reply('🔥 ¡Todos los números ya han sido reservados o comprados! No quedan números disponibles.');
+        await msg.reply('🔥 ¡Todos los números ya han sido reservados o comprados!');
         return;
     }
 
-    const fullListText = `📋 *Números Disponibles (${libres.length}/${total}):*\n\n` +
-        libres.join(' - ') +
-        `\n\n💡 Para elegir tu número, escribí: *!elegir <número> <TuNombre> <TuCasa>*`;
+    const fullListText = `📋 *Números Disponibles (${libres.length}/${total}):*\n\n` + libres.join(' - ');
 
     if (isGroup && libres.length > 50) {
         const muestra = libres.slice(0, 30).join(' - ');
-        await msg.reply(
-            `📋 *NÚMEROS DISPONIBLES: Quedan ${libres.length} de ${total}*\n\n` +
-            `*Muestra:* ${muestra}...\n\n` +
-            `📲 *Te enviamos la lista completa por mensaje privado.*\n` +
-            `💡 Para elegir: \`!elegir <número> <TuNombre> <TuCasa>\``
-        );
+        await msg.reply(`📋 *NÚMEROS DISPONIBLES: Quedan ${libres.length} de ${total}*\n*Muestra:* ${muestra}...\n📲 *Lista completa enviada por mensaje privado.*`);
         await sendPrivate(client, serializedId, fullListText);
     } else {
         await msg.reply(fullListText);
@@ -292,7 +462,7 @@ async function cmdLibres(msg, senderPhone, serializedId, isGroup, client) {
 async function cmdMisNumeros(msg, senderPhone, serializedId, isGroup, client) {
     const userNums = db.getUserNumbers(senderPhone);
     if (userNums.length === 0) {
-        await msg.reply('ℹ️ No tienes ningún número reservado con este teléfono.\nEscribí *!libres* para ver los disponibles.');
+        await msg.reply('ℹ️ No tienes ningún número reservado con este teléfono.');
         return;
     }
 
@@ -301,10 +471,9 @@ async function cmdMisNumeros(msg, senderPhone, serializedId, isGroup, client) {
         const estadoEmoji = item.estado === 'PAGADO' ? '🟢 PAGADO' : '🟡 PENDIENTE DE PAGO';
         text += `• Número *${item.numero}* -> ${estadoEmoji} (${item.vecino} - ${item.casa})\n`;
     }
-    text += `\n💡 Escribí *!alias* para ver los datos de transferencia.`;
 
     if (isGroup) {
-        await msg.reply(`📲 *${userNums[0].vecino}:* Te enviamos el detalle de tus números por mensaje privado.`);
+        await msg.reply(`📲 Detalle enviado por mensaje privado.`);
         await sendPrivate(client, serializedId, text);
     } else {
         await msg.reply(text);
@@ -318,14 +487,10 @@ async function cmdDatosPago(msg, serializedId, isGroup, client) {
         `• *Alias:* \`${config.DATOS_PAGO.alias}\`\n` +
         `• *CBU:* \`${config.DATOS_PAGO.cbu}\`\n` +
         `• *Titular:* ${config.DATOS_PAGO.titular}\n` +
-        `• *Banco:* ${config.DATOS_PAGO.banco}\n\n` +
-        `📲 Envía el comprobante al administrador para confirmar tu jugada.`;
+        `• *Banco:* ${config.DATOS_PAGO.banco}`;
 
     if (isGroup) {
-        await msg.reply(
-            `💳 *Datos de pago:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')} por número | Alias: \`${config.DATOS_PAGO.alias}\`\n` +
-            `📲 *Detalle completo enviado por privado.*`
-        );
+        await msg.reply(`💳 *Alias:* \`${config.DATOS_PAGO.alias}\` | Detalle enviado por privado.`);
         await sendPrivate(client, serializedId, text);
     } else {
         await msg.reply(text);
@@ -336,85 +501,50 @@ async function cmdIdGrupo(msg) {
     try {
         const chat = await msg.getChat();
         if (chat.isGroup) {
-            const groupId = chat.id._serialized;
-            await msg.reply(`🆔 *ID de este Grupo:* \`${groupId}\`\n\n💡 Puedes copiar este código y colocarlo en el archivo \`.env\` como \`GRUPO_ID=${groupId}\` para los mensajes automáticos.`);
+            await msg.reply(`🆔 *ID de este Grupo:* \`${chat.id._serialized}\``);
         } else {
-            await msg.reply(`ℹ️ Este comando debe enviarse dentro de un *grupo de WhatsApp* para conocer su ID.`);
+            await msg.reply(`ℹ️ Este comando debe enviarse dentro de un *grupo de WhatsApp*.`);
         }
-    } catch (err) {
-        const fallbackId = msg.to?.includes('@g.us') ? msg.to : (msg.from?.includes('@g.us') ? msg.from : null);
-        if (fallbackId) {
-            await msg.reply(`🆔 *ID de este Grupo:* \`${fallbackId}\`\n\n💡 Puedes copiar este código y colocarlo en el archivo \`.env\` como \`GRUPO_ID=${fallbackId}\` para los mensajes automáticos.`);
-        } else {
-            await msg.reply(`ℹ️ Este comando debe enviarse dentro de un *grupo de WhatsApp* para conocer su ID.`);
-        }
+    } catch {
+        await msg.reply(`ℹ️ No se pudo determinar el ID del grupo.`);
     }
 }
 
 async function cmdPagado(msg, args, adminPhone, isGroup, client) {
-    if (args.length === 0) {
-        await msg.reply('⚠️ Debes especificar el número a confirmar. Ejemplo: `!pagado 042`');
-        return;
-    }
-
+    if (args.length === 0) return;
     const result = db.confirmPayment(args[0], adminPhone);
     if (!result.success) {
         await msg.reply(`❌ ${result.message}`);
         return;
     }
-
-    const publicText = 
-        `🎉 *¡PAGO CONFIRMADO!*\n\n` +
-        `• Número: *${result.numero}*\n` +
-        `• Participante: *${result.item.vecino}* (*${result.item.casa}*)\n` +
-        `• Estado: 🟢 *PAGADO*`;
-
-    await msg.reply(publicText);
-
+    await msg.reply(`🎉 *¡PAGO CONFIRMADO!*\n• Número: *${result.numero}*\n• Participante: *${result.item.vecino}* (*${result.item.casa}*)\n• Estado: 🟢 *PAGADO*`);
     if (result.item.telefono) {
-        await sendPrivate(
-            client, 
-            result.item.telefono, 
-            `✅ ¡Hola *${result.item.vecino}*! Tu pago por el número *${result.numero}* ha sido confirmado. ¡Mucha suerte en el sorteo!`
-        );
+        await sendPrivate(client, result.item.telefono, `✅ ¡Hola *${result.item.vecino}*! Tu pago por el número *${result.numero}* ha sido confirmado.`);
     }
 }
 
 async function cmdLiberar(msg, args) {
-    if (args.length === 0) {
-        await msg.reply('⚠️ Debes especificar el número a liberar. Ejemplo: `!liberar 042`');
-        return;
-    }
-
+    if (args.length === 0) return;
     const result = db.releaseNumber(args[0]);
     if (!result.success) {
         await msg.reply(`❌ ${result.message}`);
         return;
     }
-
-    let text = `♻️ El número *${result.numero}* ha sido liberado y queda nuevamente disponible para cualquier vecino.`;
-    if (result.anterior && result.anterior.vecino) {
-        text += ` (Estaba a nombre de: ${result.anterior.vecino} - ${result.anterior.casa})`;
-    }
-
-    await msg.reply(text);
+    await msg.reply(`♻️ El número *${result.numero}* ha sido liberado y queda disponible nuevamente.`);
 }
 
 async function cmdPendientes(msg, serializedId, isGroup, client) {
     const pendientes = db.getPendingPayments();
     if (pendientes.length === 0) {
-        await msg.reply('👏 ¡Excelente! No hay números pendientes de pago.');
+        await msg.reply('👏 No hay números pendientes de pago.');
         return;
     }
-
     let text = `⏳ *Números Reservados Pendientes de Pago (${pendientes.length}):*\n\n`;
     for (const item of pendientes) {
         text += `• *#${item.numero}* - ${item.vecino} (${item.casa})\n`;
     }
-    text += `\n💡 Para confirmar un pago recibido, escribí: \`!pagado <número>\``;
-
     if (isGroup) {
-        await msg.reply('🔒 *Información privada:* Te envié la lista de deudores por mensaje privado.');
+        await msg.reply('🔒 Lista de deudores enviada por privado.');
         await sendPrivate(client, serializedId, text);
     } else {
         await msg.reply(text);
@@ -423,20 +553,13 @@ async function cmdPendientes(msg, serializedId, isGroup, client) {
 
 async function cmdResumen(msg, serializedId, isGroup, client) {
     const summary = db.getSummary();
-    const porcentajeVenta = (( (summary.pagados + summary.reservados) / summary.total ) * 100).toFixed(1);
-
     const text = 
         `📊 *BALANCE GENERAL - ${config.EVENTO_NOMBRE}* 📊\n\n` +
-        `• *Total de números:* ${summary.total}\n` +
-        `• 🟢 *Pagados:* ${summary.pagados}\n` +
-        `• 🟡 *Reservados (sin pagar):* ${summary.reservados}\n` +
-        `• ⚪ *Libres:* ${summary.libres}\n` +
-        `• 📈 *Ocupación:* ${porcentajeVenta}%\n\n` +
+        `• *Total:* ${summary.total} | 🟢 *Pagados:* ${summary.pagados} | 🟡 *Reservados:* ${summary.reservados} | ⚪ *Libres:* ${summary.libres}\n` +
         `💰 *Recaudación Confirmada:* $${summary.recaudado.toLocaleString('es-AR')}\n` +
-        `🎯 *Recaudación Potencial (total):* $${summary.potencial.toLocaleString('es-AR')}`;
-
+        `🎯 *Recaudación Potencial:* $${summary.potencial.toLocaleString('es-AR')}`;
     if (isGroup) {
-        await msg.reply('🔒 *Información privada:* Te envié el balance y recaudación por mensaje privado.');
+        await msg.reply('🔒 Balance enviado por privado.');
         await sendPrivate(client, serializedId, text);
     } else {
         await msg.reply(text);
@@ -447,20 +570,14 @@ async function cmdTablero(msg, serializedId, isGroup, client) {
     const fs = require('fs');
     const path = require('path');
     const raw = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'data', 'quiniela.json'), 'utf-8'));
-
-    let text = `📋 *TABLERO COMPLETO DE NÚMEROS:*\n\n`;
+    let text = `📋 *TABLERO DE NÚMEROS:*\n\n`;
     for (const [num, data] of Object.entries(raw.numeros)) {
-        if (data.estado === 'LIBRE') {
-            text += `[${num}] ⚪ Libre\n`;
-        } else if (data.estado === 'RESERVADO') {
-            text += `[${num}] 🟡 ${data.vecino} (${data.casa}) - Pendiente\n`;
-        } else if (data.estado === 'PAGADO') {
-            text += `[${num}] 🟢 ${data.vecino} (${data.casa}) - Pagado\n`;
-        }
+        if (data.estado === 'LIBRE') text += `[${num}] ⚪ Libre\n`;
+        else if (data.estado === 'RESERVADO') text += `[${num}] 🟡 ${data.vecino} (${data.casa}) - Pendiente\n`;
+        else if (data.estado === 'PAGADO') text += `[${num}] 🟢 ${data.vecino} (${data.casa}) - Pagado\n`;
     }
-
     if (isGroup) {
-        await msg.reply('🔒 *Información privada:* Te envié el tablero completo por mensaje privado.');
+        await msg.reply('🔒 Tablero enviado por privado.');
         await sendPrivate(client, serializedId, text);
     } else {
         await msg.reply(text);
@@ -468,35 +585,14 @@ async function cmdTablero(msg, serializedId, isGroup, client) {
 }
 
 async function cmdAnuncio(msg, args, client) {
-    let targetChat = config.GRUPO_ID;
-
-    if (!targetChat) {
-        try {
-            const chat = await msg.getChat();
-            if (chat.isGroup) {
-                targetChat = chat.id._serialized;
-            }
-        } catch (err) {
-            targetChat = msg.to?.includes('@g.us') ? msg.to : (msg.from?.includes('@g.us') ? msg.from : null);
-        }
-    }
-
-    if (!targetChat) {
-        await msg.reply('⚠️ No hay un grupo configurado en `GRUPO_ID` ni estás ejecutando el comando dentro de un grupo.');
-        return;
-    }
-
+    if (!config.GRUPO_ID) return;
     const customText = args.length > 0 ? args.join(' ') : null;
     const messageToSend = scheduler.buildReminderMessage(customText);
-
     try {
-        await scheduler.sendBroadcast(client, targetChat, messageToSend);
-        if (msg.from !== targetChat) {
-            await msg.reply('✅ Anuncio enviado exitosamente al grupo.');
-        }
-    } catch (error) {
-        console.error('[Error al enviar anuncio]:', error);
-        await msg.reply('❌ No se pudo enviar el anuncio al grupo. Verifica que el bot pertenezca al grupo y que el ID sea correcto.');
+        await scheduler.sendBroadcast(client, config.GRUPO_ID, messageToSend);
+        await msg.reply('✅ Anuncio enviado exitosamente al grupo.');
+    } catch (e) {
+        console.error('[Error al enviar anuncio]:', e);
     }
 }
 
