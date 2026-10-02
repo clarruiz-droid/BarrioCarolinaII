@@ -247,11 +247,22 @@ async function cmdDatosPago(msg) {
 }
 
 async function cmdIdGrupo(msg) {
-    const isGroup = msg.from.includes('@g.us');
-    if (isGroup) {
-        await msg.reply(`🆔 *ID de este Grupo:* \`${msg.from}\`\n\n💡 Puedes copiar este código y colocarlo en el archivo \`.env\` como \`GRUPO_ID=${msg.from}\` para los mensajes automáticos.`);
-    } else {
-        await msg.reply(`ℹ️ Este comando debe enviarse dentro de un *grupo de WhatsApp* para conocer su ID.`);
+    try {
+        const chat = await msg.getChat();
+        if (chat.isGroup) {
+            const groupId = chat.id._serialized;
+            await msg.reply(`🆔 *ID de este Grupo:* \`${groupId}\`\n\n💡 Puedes copiar este código y colocarlo en el archivo \`.env\` como \`GRUPO_ID=${groupId}\` para los mensajes automáticos.`);
+        } else {
+            await msg.reply(`ℹ️ Este comando debe enviarse dentro de un *grupo de WhatsApp* para conocer su ID.`);
+        }
+    } catch (err) {
+        console.error('[Error obteniendo chat]:', err);
+        const fallbackId = msg.to?.includes('@g.us') ? msg.to : (msg.from?.includes('@g.us') ? msg.from : null);
+        if (fallbackId) {
+            await msg.reply(`🆔 *ID de este Grupo:* \`${fallbackId}\`\n\n💡 Puedes copiar este código y colocarlo en el archivo \`.env\` como \`GRUPO_ID=${fallbackId}\` para los mensajes automáticos.`);
+        } else {
+            await msg.reply(`ℹ️ Este comando debe enviarse dentro de un *grupo de WhatsApp* para conocer su ID.`);
+        }
     }
 }
 
@@ -354,7 +365,18 @@ async function cmdTablero(msg) {
 }
 
 async function cmdAnuncio(msg, args, client) {
-    const targetChat = config.GRUPO_ID || (msg.from.includes('@g.us') ? msg.from : null);
+    let targetChat = config.GRUPO_ID;
+
+    if (!targetChat) {
+        try {
+            const chat = await msg.getChat();
+            if (chat.isGroup) {
+                targetChat = chat.id._serialized;
+            }
+        } catch (err) {
+            targetChat = msg.to?.includes('@g.us') ? msg.to : (msg.from?.includes('@g.us') ? msg.from : null);
+        }
+    }
 
     if (!targetChat) {
         await msg.reply('⚠️ No hay un grupo configurado en `GRUPO_ID` ni estás ejecutando el comando dentro de un grupo.');
