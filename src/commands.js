@@ -45,13 +45,31 @@ async function handleMessage(msg, client) {
     const command = args.shift().toLowerCase();
     const senderPhone = getSenderPhone(msg);
 
-    // Detectar si el mensaje proviene de un grupo
+    // Detectar si el mensaje proviene de un grupo y obtener el ID
     let isGroup = false;
+    let currentGroupId = null;
     try {
         const chat = await msg.getChat();
         isGroup = chat.isGroup;
+        if (isGroup) {
+            currentGroupId = chat.id._serialized;
+        }
     } catch {
         isGroup = msg.from.includes('@g.us') || msg.to?.includes('@g.us');
+        currentGroupId = msg.from.includes('@g.us') ? msg.from : msg.to;
+    }
+
+    // Filtro de seguridad: si es un grupo, solo responder si coincide con GRUPO_ID (excepto !idgrupo)
+    if (isGroup) {
+        if (command === 'idgrupo' || command === 'grupo' || command === 'chatid') {
+            await cmdIdGrupo(msg);
+            return;
+        }
+
+        if (config.GRUPO_ID && currentGroupId !== config.GRUPO_ID) {
+            // Ignorar silenciosamente cualquier otro grupo ajeno
+            return;
+        }
     }
 
     try {
