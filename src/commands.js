@@ -1,5 +1,6 @@
 const config = require('./config');
 const db = require('./db');
+const scheduler = require('./scheduler');
 
 /**
  * Obtiene el número telefónico limpio del remitente
@@ -24,7 +25,7 @@ function isAdmin(phone) {
 /**
  * Manejador principal de comandos
  */
-async function handleMessage(msg) {
+async function handleMessage(msg, client) {
     const body = (msg.body || '').trim();
     if (!body.startsWith(config.PREFIX)) return;
 
@@ -63,6 +64,12 @@ async function handleMessage(msg) {
             case 'cbu':
             case 'datos':
                 await cmdDatosPago(msg);
+                break;
+
+            case 'idgrupo':
+            case 'grupo':
+            case 'chatid':
+                await cmdIdGrupo(msg);
                 break;
 
             // --- COMANDOS DE ADMINISTRADOR ---
@@ -112,6 +119,16 @@ async function handleMessage(msg) {
                 await cmdTablero(msg);
                 break;
 
+            case 'anuncio':
+            case 'recordatorio':
+            case 'difundir':
+                if (!isAdmin(senderPhone)) {
+                    await msg.reply('⛔ Este comando solo puede ser utilizado por administradores.');
+                    return;
+                }
+                await cmdAnuncio(msg, args, client);
+                break;
+
             default:
                 // Comando no reconocido
                 break;
@@ -133,6 +150,7 @@ async function cmdAyuda(msg, senderPhone) {
     text += `• *!libres* : Ver la lista de números disponibles\n`;
     text += `• *!misnumeros* : Ver qué números tienes reservados/pagados\n`;
     text += `• *!alias* o *!pago* : Datos para realizar la transferencia\n`;
+    text += `• *!idgrupo* : Ver el identificador de este chat/grupo\n`;
     text += `• *!ayuda* : Mostrar este menú\n`;
 
     if (isAdmin(senderPhone)) {
@@ -142,6 +160,7 @@ async function cmdAyuda(msg, senderPhone) {
         text += `• *!pendientes* : Listar reservas sin pagar\n`;
         text += `• *!resumen* : Balance y recaudación general\n`;
         text += `• *!tablero* : Listado completo de todos los números\n`;
+        text += `• *!anuncio [texto]* : Enviar un recordatorio o comunicado al grupo\n`;
     }
 
     await msg.reply(text);
@@ -227,6 +246,15 @@ async function cmdDatosPago(msg) {
     await msg.reply(text);
 }
 
+async function cmdIdGrupo(msg) {
+    const isGroup = msg.from.includes('@g.us');
+    if (isGroup) {
+        await msg.reply(`🆔 *ID de este Grupo:* \`${msg.from}\`\n\n💡 Puedes copiar este código y colocarlo en el archivo \`.env\` como \`GRUPO_ID=${msg.from}\` para los mensajes automáticos.`);
+    } else {
+        await msg.reply(`ℹ️ Este comando debe enviarse dentro de un *grupo de WhatsApp* para conocer su ID.`);
+    }
+}
+
 // -------------------------------------------------------------
 // IMPLEMENTACIÓN DE COMANDOS DE ADMINISTRADOR
 // -------------------------------------------------------------
@@ -307,8 +335,6 @@ async function cmdResumen(msg) {
 }
 
 async function cmdTablero(msg) {
-    const dbData = db.readRawData ? db.readRawData() : require('./db').getNumber;
-    // Lectura completa para el tablero
     const fs = require('fs');
     const path = require('path');
     const raw = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'data', 'quiniela.json'), 'utf-8'));
@@ -325,6 +351,28 @@ async function cmdTablero(msg) {
     }
 
     await msg.reply(text);
+}
+
+async function cmdAnuncio(msg, args, client) {
+    const targetChat = config.GRUPO_ID || (msg.from.includes('@g.us') ? msg.from : null);
+
+    if (!targetChat) {
+        await msg.reply('⚠️ No hay un grupo configurado en `GRUPO_ID` ni estás ejecutando el comando dentro de un grupo.');
+        return;
+    }
+
+    const customText = args.length > 0 ? args.join(' ') : null;
+    const messageToSend = scheduler.buildReminderMessage(customText);
+
+    try {
+        await scheduler.sendBroadcast(client, targetChat, messageToSend);
+        if (msg.from !== targetChat) {
+            await msg.reply('✅ Anuncio enviado exitosamente al grupo.');
+        }
+    } catch (error) {
+        console.error('[Error al enviar anuncio]:', error);
+        await msg.reply('❌ No se pudo enviar el anuncio al grupo. Verifica que el bot pertenezca al grupo y que el ID sea correcto.');
+    }
 }
 
 module.exports = {

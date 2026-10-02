@@ -3,6 +3,7 @@ const qrcode = require('qrcode-terminal');
 const config = require('./config');
 const db = require('./db');
 const commands = require('./commands');
+const scheduler = require('./scheduler');
 
 console.log('====================================================');
 console.log(`🤖 Iniciando Bot: ${config.EVENTO_NOMBRE}`);
@@ -53,13 +54,16 @@ client.on('ready', () => {
     console.log(`📌 Prefijo configurado: "${config.PREFIX}"`);
     console.log(`📌 Administradores registrados: ${config.ADMIN_PHONES.length > 0 ? config.ADMIN_PHONES.join(', ') : 'Todos (modo sin restricción)'}`);
     console.log('----------------------------------------------------\n');
+
+    // Inicializar el programador de recordatorios automáticos
+    scheduler.initScheduler(client);
 });
 
 // Evento: Mensajes recibidos (tanto privados como en grupos)
 client.on('message_create', async (msg) => {
     // Si el mensaje empieza con el prefijo, procesar comando
     if (msg.body && msg.body.startsWith(config.PREFIX)) {
-        await commands.handleMessage(msg);
+        await commands.handleMessage(msg, client);
     }
 });
 

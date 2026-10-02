@@ -24,8 +24,16 @@ module.exports = {
     HORAS_LIMITE_PAGO: parseInt(process.env.HORAS_LIMITE_PAGO || "24", 10),
 
     // Teléfonos de Administradores (formato internacional sin signos, ej: '5491112345678')
-    // Los números que estén en esta lista podrán usar comandos como !pagado, !liberar, etc.
     ADMIN_PHONES: (process.env.ADMIN_PHONES || "").split(',').map(p => p.trim()).filter(Boolean),
+
+    // ID del grupo de WhatsApp para recordatorios automáticos (ej: '120363012345678@g.us')
+    GRUPO_ID: process.env.GRUPO_ID || "",
+
+    // Programación de recordatorios automáticos (Cron: por defecto a las 11:00 y 19:00 todos los días)
+    CRON_RECORDATORIO: process.env.CRON_RECORDATORIO || "0 11,19 * * *",
+
+    // Activar o desactivar recordatorios automáticos
+    RECORDATORIOS_ACTIVOS: process.env.RECORDATORIOS_ACTIVOS === 'true' || process.env.RECORDATORIOS_ACTIVOS === undefined,
 
     // Prefijo de comandos
     PREFIX: "!"
