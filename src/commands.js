@@ -3,11 +3,24 @@ const db = require('./db');
 const scheduler = require('./scheduler');
 
 /**
- * Obtiene el número telefónico limpio del remitente
+ * Obtiene la información del remitente (número telefónico y ID de chat serializado)
  */
-function getSenderPhone(msg) {
-    const sender = msg.author || (msg.fromMe ? (msg.from.includes('@c.us') ? msg.from : msg.to) : msg.from) || '';
-    return sender.replace(/@c\.us|@s\.whatsapp\.net|@lid/g, '');
+async function getSenderInfo(msg) {
+    let rawId = msg.author || (msg.fromMe ? (msg.from.includes('@g.us') ? msg.to : msg.from) : msg.from) || '';
+    let phone = rawId.replace(/@.*/, '');
+    let serializedId = rawId;
+
+    try {
+        const contact = await msg.getContact();
+        if (contact && contact.id) {
+            serializedId = contact.id._serialized;
+            phone = contact.number || contact.id.user || phone;
+        }
+    } catch {
+        // Usar fallback con el ID crudo
+    }
+
+    return { phone, serializedId };
 }
 
 /**
@@ -21,15 +34,18 @@ function isAdmin(phone) {
 }
 
 /**
- * Envía un mensaje privado al remitente
+ * Envía un mensaje privado al remitente de forma segura
  */
-async function sendPrivate(client, phone, text) {
+async function sendPrivate(client, targetId, text) {
     try {
-        const chatId = phone.includes('@') ? phone : `${phone}@c.us`;
-        await client.sendMessage(chatId, text);
+        let dest = targetId;
+        if (!dest.includes('@')) {
+            dest = `${dest}@c.us`;
+        }
+        await client.sendMessage(dest, text);
         return true;
     } catch (e) {
-        console.error(`[Error enviando privado a ${phone}]:`, e);
+        console.error(`[Error enviando privado a ${targetId}]:`, e.message);
         return false;
     }
 }
@@ -43,9 +59,8 @@ async function handleMessage(msg, client) {
 
     const args = body.slice(config.PREFIX.length).trim().split(/\s+/);
     const command = args.shift().toLowerCase();
-    const senderPhone = getSenderPhone(msg);
+    const { phone: senderPhone, serializedId } = await getSenderInfo(msg);
 
-    // Detectar si el mensaje proviene de un grupo y obtener el ID
     let isGroup = false;
     let currentGroupId = null;
     try {
@@ -59,7 +74,7 @@ async function handleMessage(msg, client) {
         currentGroupId = msg.from.includes('@g.us') ? msg.from : msg.to;
     }
 
-    // Filtro de seguridad: si es un grupo, solo responder si coincide con GRUPO_ID (excepto !idgrupo)
+    // Filtro: Si es un grupo, solo atender en GRUPO_ID
     if (isGroup) {
         if (command === 'idgrupo' || command === 'grupo' || command === 'chatid') {
             await cmdIdGrupo(msg);
@@ -67,8 +82,7 @@ async function handleMessage(msg, client) {
         }
 
         if (config.GRUPO_ID && currentGroupId !== config.GRUPO_ID) {
-            // Ignorar silenciosamente cualquier otro grupo ajeno
-            return;
+            return; // Ignorar silenciosamente otros grupos
         }
     }
 
@@ -84,25 +98,25 @@ async function handleMessage(msg, client) {
             case 'reserva':
             case 'reservar':
             case 'numero':
-                await cmdElegir(msg, args, senderPhone, isGroup, client);
+                await cmdElegir(msg, args, senderPhone, serializedId, isGroup, client);
                 break;
 
             case 'libres':
             case 'disponibles':
-                await cmdLibres(msg, senderPhone, isGroup, client);
+                await cmdLibres(msg, senderPhone, serializedId, isGroup, client);
                 break;
 
             case 'misnumeros':
             case 'minumero':
             case 'mis':
-                await cmdMisNumeros(msg, senderPhone, isGroup, client);
+                await cmdMisNumeros(msg, senderPhone, serializedId, isGroup, client);
                 break;
 
             case 'alias':
             case 'pago':
             case 'cbu':
             case 'datos':
-                await cmdDatosPago(msg, senderPhone, isGroup, client);
+                await cmdDatosPago(msg, serializedId, isGroup, client);
                 break;
 
             case 'idgrupo':
@@ -111,7 +125,6 @@ async function handleMessage(msg, client) {
                 await cmdIdGrupo(msg);
                 break;
 
-            // --- COMANDOS DE ADMINISTRADOR ---
             case 'pagado':
             case 'confirmar':
                 if (!isAdmin(senderPhone)) {
@@ -136,7 +149,7 @@ async function handleMessage(msg, client) {
                     await msg.reply('⛔ Este comando solo puede ser utilizado por administradores.');
                     return;
                 }
-                await cmdPendientes(msg, senderPhone, isGroup, client);
+                await cmdPendientes(msg, serializedId, isGroup, client);
                 break;
 
             case 'resumen':
@@ -146,7 +159,7 @@ async function handleMessage(msg, client) {
                     await msg.reply('⛔ Este comando solo puede ser utilizado por administradores.');
                     return;
                 }
-                await cmdResumen(msg, senderPhone, isGroup, client);
+                await cmdResumen(msg, serializedId, isGroup, client);
                 break;
 
             case 'tablero':
@@ -155,7 +168,7 @@ async function handleMessage(msg, client) {
                     await msg.reply('⛔ Este comando solo puede ser utilizado por administradores.');
                     return;
                 }
-                await cmdTablero(msg, senderPhone, isGroup, client);
+                await cmdTablero(msg, serializedId, isGroup, client);
                 break;
 
             case 'anuncio':
@@ -204,7 +217,7 @@ async function cmdAyuda(msg, senderPhone, isGroup, client) {
     await msg.reply(text);
 }
 
-async function cmdElegir(msg, args, senderPhone, isGroup, client) {
+async function cmdElegir(msg, args, senderPhone, serializedId, isGroup, client) {
     if (args.length < 3) {
         await msg.reply(
             `⚠️ *Formato incorrecto.*\n\n` +
@@ -238,21 +251,18 @@ async function cmdElegir(msg, args, senderPhone, isGroup, client) {
         `⚠️ *Importante:* Envía el comprobante de transferencia al administrador dentro de las *${config.HORAS_LIMITE_PAGO} hs* para confirmar tu jugada.`;
 
     if (isGroup) {
-        // En el grupo: confirmación corta y limpia
         await msg.reply(
             `🎉 ¡Felicitaciones *${vecino}* (*${casa}*)!\n` +
             `🟡 Reservaste con éxito el número: *${result.numero}*\n\n` +
             `📲 *Te enviamos los datos de pago por mensaje privado.*`
         );
-        // En privado: enviamos los datos de cobro completos
-        await sendPrivate(client, senderPhone, datosPagoMsg);
+        await sendPrivate(client, serializedId, datosPagoMsg);
     } else {
-        // Si ya está en privado, le enviamos todo directamente
         await msg.reply(datosPagoMsg);
     }
 }
 
-async function cmdLibres(msg, senderPhone, isGroup, client) {
+async function cmdLibres(msg, senderPhone, serializedId, isGroup, client) {
     const libres = db.getAvailableNumbers();
     const total = config.NUMERO_MAX - config.NUMERO_MIN + 1;
 
@@ -266,21 +276,20 @@ async function cmdLibres(msg, senderPhone, isGroup, client) {
         `\n\n💡 Para elegir tu número, escribí: *!elegir <número> <TuNombre> <TuCasa>*`;
 
     if (isGroup && libres.length > 50) {
-        // En grupo grande: mensaje resumen para no saturar el chat
         const muestra = libres.slice(0, 30).join(' - ');
         await msg.reply(
             `📋 *NÚMEROS DISPONIBLES: Quedan ${libres.length} de ${total}*\n\n` +
             `*Muestra:* ${muestra}...\n\n` +
-            `📲 *Te enviamos la lista completa por mensaje privado para no llenar el grupo.*\n` +
+            `📲 *Te enviamos la lista completa por mensaje privado.*\n` +
             `💡 Para elegir: \`!elegir <número> <TuNombre> <TuCasa>\``
         );
-        await sendPrivate(client, senderPhone, fullListText);
+        await sendPrivate(client, serializedId, fullListText);
     } else {
         await msg.reply(fullListText);
     }
 }
 
-async function cmdMisNumeros(msg, senderPhone, isGroup, client) {
+async function cmdMisNumeros(msg, senderPhone, serializedId, isGroup, client) {
     const userNums = db.getUserNumbers(senderPhone);
     if (userNums.length === 0) {
         await msg.reply('ℹ️ No tienes ningún número reservado con este teléfono.\nEscribí *!libres* para ver los disponibles.');
@@ -296,13 +305,13 @@ async function cmdMisNumeros(msg, senderPhone, isGroup, client) {
 
     if (isGroup) {
         await msg.reply(`📲 *${userNums[0].vecino}:* Te enviamos el detalle de tus números por mensaje privado.`);
-        await sendPrivate(client, senderPhone, text);
+        await sendPrivate(client, serializedId, text);
     } else {
         await msg.reply(text);
     }
 }
 
-async function cmdDatosPago(msg, senderPhone, isGroup, client) {
+async function cmdDatosPago(msg, serializedId, isGroup, client) {
     const text = 
         `💳 *DATOS DE PAGO / TRANSFERENCIA* 💳\n\n` +
         `💰 *Valor por número:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')}\n` +
@@ -317,7 +326,7 @@ async function cmdDatosPago(msg, senderPhone, isGroup, client) {
             `💳 *Datos de pago:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')} por número | Alias: \`${config.DATOS_PAGO.alias}\`\n` +
             `📲 *Detalle completo enviado por privado.*`
         );
-        await sendPrivate(client, senderPhone, text);
+        await sendPrivate(client, serializedId, text);
     } else {
         await msg.reply(text);
     }
@@ -333,7 +342,6 @@ async function cmdIdGrupo(msg) {
             await msg.reply(`ℹ️ Este comando debe enviarse dentro de un *grupo de WhatsApp* para conocer su ID.`);
         }
     } catch (err) {
-        console.error('[Error obteniendo chat]:', err);
         const fallbackId = msg.to?.includes('@g.us') ? msg.to : (msg.from?.includes('@g.us') ? msg.from : null);
         if (fallbackId) {
             await msg.reply(`🆔 *ID de este Grupo:* \`${fallbackId}\`\n\n💡 Puedes copiar este código y colocarlo en el archivo \`.env\` como \`GRUPO_ID=${fallbackId}\` para los mensajes automáticos.`);
@@ -342,10 +350,6 @@ async function cmdIdGrupo(msg) {
         }
     }
 }
-
-// -------------------------------------------------------------
-// IMPLEMENTACIÓN DE COMANDOS DE ADMINISTRADOR
-// -------------------------------------------------------------
 
 async function cmdPagado(msg, args, adminPhone, isGroup, client) {
     if (args.length === 0) {
@@ -367,7 +371,6 @@ async function cmdPagado(msg, args, adminPhone, isGroup, client) {
 
     await msg.reply(publicText);
 
-    // Notificar también al vecino por privado
     if (result.item.telefono) {
         await sendPrivate(
             client, 
@@ -397,7 +400,7 @@ async function cmdLiberar(msg, args) {
     await msg.reply(text);
 }
 
-async function cmdPendientes(msg, senderPhone, isGroup, client) {
+async function cmdPendientes(msg, serializedId, isGroup, client) {
     const pendientes = db.getPendingPayments();
     if (pendientes.length === 0) {
         await msg.reply('👏 ¡Excelente! No hay números pendientes de pago.');
@@ -412,13 +415,13 @@ async function cmdPendientes(msg, senderPhone, isGroup, client) {
 
     if (isGroup) {
         await msg.reply('🔒 *Información privada:* Te envié la lista de deudores por mensaje privado.');
-        await sendPrivate(client, senderPhone, text);
+        await sendPrivate(client, serializedId, text);
     } else {
         await msg.reply(text);
     }
 }
 
-async function cmdResumen(msg, senderPhone, isGroup, client) {
+async function cmdResumen(msg, serializedId, isGroup, client) {
     const summary = db.getSummary();
     const porcentajeVenta = (( (summary.pagados + summary.reservados) / summary.total ) * 100).toFixed(1);
 
@@ -434,13 +437,13 @@ async function cmdResumen(msg, senderPhone, isGroup, client) {
 
     if (isGroup) {
         await msg.reply('🔒 *Información privada:* Te envié el balance y recaudación por mensaje privado.');
-        await sendPrivate(client, senderPhone, text);
+        await sendPrivate(client, serializedId, text);
     } else {
         await msg.reply(text);
     }
 }
 
-async function cmdTablero(msg, senderPhone, isGroup, client) {
+async function cmdTablero(msg, serializedId, isGroup, client) {
     const fs = require('fs');
     const path = require('path');
     const raw = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'data', 'quiniela.json'), 'utf-8'));
@@ -458,7 +461,7 @@ async function cmdTablero(msg, senderPhone, isGroup, client) {
 
     if (isGroup) {
         await msg.reply('🔒 *Información privada:* Te envié el tablero completo por mensaje privado.');
-        await sendPrivate(client, senderPhone, text);
+        await sendPrivate(client, serializedId, text);
     } else {
         await msg.reply(text);
     }
