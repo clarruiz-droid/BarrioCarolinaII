@@ -26,6 +26,8 @@ const client = new Client({
     puppeteer: {
         headless: true,
         executablePath: puppeteerExecutablePath,
+        protocolTimeout: 0,
+        bypassCSP: true,
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -58,7 +60,6 @@ client.on('auth_failure', (msg) => {
 // Evento: Bot listo para operar
 client.on('ready', () => {
     console.log('\n✅ [BOT LISTO] El bot está conectado y escuchando mensajes.');
-    console.log(`📌 Prefijo configurado: "${config.PREFIX}"`);
     console.log(`📌 Administradores registrados: ${config.ADMIN_PHONES.length > 0 ? config.ADMIN_PHONES.join(', ') : 'Todos (modo sin restricción)'}`);
     console.log('----------------------------------------------------\n');
 
@@ -66,10 +67,14 @@ client.on('ready', () => {
     scheduler.initScheduler(client);
 });
 
-// Evento: Mensajes recibidos (tanto privados como en grupos)
+// Evento: Mensajes recibidos
 client.on('message_create', async (msg) => {
     if (msg.body) {
-        await commands.handleMessage(msg, client);
+        try {
+            await commands.handleMessage(msg, client);
+        } catch (err) {
+            console.error('[Error procesando mensaje]:', err);
+        }
     }
 });
 
