@@ -80,6 +80,23 @@ client.on('disconnected', (reason) => {
     console.log('⚠️ [DESCONECTADO] El bot fue desconectado:', reason);
 });
 
+// Captura de eventos no controlados para evitar que caídas de navegación de Puppeteer cierren el bot
+process.on('unhandledRejection', (reason) => {
+    if (reason && String(reason.message || reason).includes('Execution context was destroyed')) {
+        console.log('[Puppeteer] Esperando que la página de WhatsApp termine de cargar...');
+        return;
+    }
+    console.error('[Unhandled Rejection]:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+    if (err && String(err.message || err).includes('Execution context was destroyed')) {
+        console.log('[Puppeteer] Sincronizando contexto de WhatsApp...');
+        return;
+    }
+    console.error('[Uncaught Exception]:', err);
+});
+
 // Manejo de cierre seguro del proceso
 process.on('SIGINT', async () => {
     console.log('\n🛑 Cerrando cliente de WhatsApp...');
