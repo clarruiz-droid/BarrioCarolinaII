@@ -29,24 +29,6 @@ function resetSession(userId) {
     };
 }
 
-async function getSenderInfo(msg) {
-    let rawId = msg.author || (msg.fromMe ? (msg.from.includes('@g.us') ? msg.to : msg.from) : msg.from) || '';
-    let phone = rawId.replace(/@.*/, '');
-    let serializedId = rawId;
-
-    try {
-        const contact = await msg.getContact();
-        if (contact && contact.id) {
-            serializedId = contact.id._serialized;
-            phone = contact.number || contact.id.user || phone;
-        }
-    } catch {
-        // Fallback
-    }
-
-    return { phone, serializedId };
-}
-
 function isAdmin(phone) {
     if (!config.ADMIN_PHONES || config.ADMIN_PHONES.length === 0) {
         return true;
@@ -54,123 +36,122 @@ function isAdmin(phone) {
     return config.ADMIN_PHONES.some(admin => phone.endsWith(admin) || admin.endsWith(phone));
 }
 
-async function sendPrivate(client, targetId, text) {
+/**
+ * Enviar mensaje de forma directa y segura
+ */
+async function sendReply(client, chatId, text) {
     try {
-        let dest = targetId;
-        if (!dest.includes('@')) {
-            dest = `${dest}@c.us`;
-        }
-        await client.sendMessage(dest, text);
+        await client.sendMessage(chatId, text);
         return true;
     } catch (e) {
-        console.error(`[Error enviando privado a ${targetId}]:`, e.message);
+        console.error(`[Error enviando mensaje a ${chatId}]:`, e.message);
         return false;
     }
 }
 
 /**
- * Manejador principal de mensajes
+ * Manejador principal de mensajes entrantes
  */
 async function handleMessage(msg, client) {
     const rawBody = (msg.body || '').trim();
     if (!rawBody) return;
 
-    const normalizedBody = rawBody.toUpperCase();
-    const { phone: senderPhone, serializedId } = await getSenderInfo(msg);
-    const session = getSession(serializedId);
+    // Detectar si es grupo o privado de forma directa y rápida
+    const isGroup = msg.from.endsWith('@g.us') || (msg.fromMe && (msg.to || '').endsWith('@g.us'));
+    const currentGroupId = isGroup ? (msg.from.endsWith('@g.us') ? msg.from : msg.to) : null;
+    
+    // Identificar al remitente
+    const senderChatId = isGroup ? (msg.author || msg.from) : msg.from;
+    const senderPhone = senderChatId.replace(/@.*/, '');
+    const session = getSession(senderChatId);
 
-    let isGroup = false;
-    let currentGroupId = null;
-    try {
-        const chat = await msg.getChat();
-        isGroup = chat.isGroup;
-        if (isGroup) {
-            currentGroupId = chat.id._serialized;
-        }
-    } catch {
-        isGroup = msg.from.includes('@g.us') || msg.to?.includes('@g.us');
-        currentGroupId = msg.from.includes('@g.us') ? msg.from : msg.to;
-    }
+    console.log(`\n📩 [MSG RECIBIDO] De: ${senderPhone} (${senderChatId}) | Grupo: ${isGroup ? currentGroupId : 'NO (Privado)'} | Texto: "${rawBody}"`);
+
+    const normalizedBody = rawBody.toUpperCase();
 
     // =============================================================
-    // 1. MENSAJES DENTRO DEL GRUPO DE WHATSAPP
+    // 1. SI EL MENSAJE ES EN UN GRUPO
     // =============================================================
     if (isGroup) {
-        // Comando administrativo para obtener el ID del grupo
+        // Comando administrativo para ver el ID
         if (rawBody.toLowerCase() === '!idgrupo') {
-            await cmdIdGrupo(msg);
+            await sendReply(client, currentGroupId, `🆔 *ID de este Grupo:* \`${currentGroupId}\``);
             return;
         }
 
-        // Filtro de seguridad: ignorar grupos ajenos
+        // Si hay GRUPO_ID configurado y no coincide con este grupo, ignorar
         if (config.GRUPO_ID && currentGroupId !== config.GRUPO_ID) {
+            console.log(`[Filtro] Mensaje ignorado porque el grupo ${currentGroupId} no coincide con GRUPO_ID (${config.GRUPO_ID})`);
             return;
         }
 
-        // Si es un anuncio manual del admin en el grupo
+        // Anuncios manuales del admin en el grupo
         if (rawBody.startsWith('!anuncio') && isAdmin(senderPhone)) {
             const args = rawBody.slice('!anuncio'.length).trim().split(/\s+/);
-            await cmdAnuncio(msg, args, client);
+            await cmdAnuncio(client, currentGroupId, args);
             return;
         }
 
-        // Si alguien escribe SORTEO o comandos en el grupo: redirigir al chat privado
+        // Si escriben SORTEO o comandos en el grupo: avisar e invitar al privado
         if (normalizedBody === 'SORTEO' || rawBody.startsWith('!')) {
             const botNumber = client.info?.wid?.user;
-            const waLink = botNumber ? `\n\n👉 *Haz clic aquí para chatear en privado:* https://wa.me/${botNumber}?text=SORTEO` : '';
+            const waLink = botNumber ? `\n\n👉 *Haz clic aquí:* https://wa.me/${botNumber}?text=SORTEO` : '';
             
-            await msg.reply(
-                `👋 ¡Hola! Para elegir tu número y ver los disponibles sin llenar el grupo de mensajes, la atención es por *chat privado* 📲.\n\n` +
+            await sendReply(
+                client, 
+                currentGroupId,
+                `👋 ¡Hola! Para reservar tu número y ver los disponibles, la atención es por *chat privado* 📲.\n\n` +
                 `Por favor envíame un mensaje privado con la palabra *SORTEO*.${waLink}`
             );
 
-            // Iniciar también el menú directamente en su chat privado
+            // Iniciar también el menú en su privado
             session.step = 'MENU';
             session.tempData = {};
-            await sendPrivate(client, serializedId, buildMainMenu(senderPhone));
+            await sendReply(client, senderChatId, buildMainMenu(senderPhone));
             return;
         }
 
-        // Cualquier otro texto en el grupo no se procesa para no interferir
         return;
     }
 
     // =============================================================
-    // 2. MENSAJES EN CHAT PRIVADO (ATENCIÓN EXCLUSIVA)
+    // 2. SI EL MENSAJE ES EN CHAT PRIVADO
     // =============================================================
 
-    // Apertura del menú con "SORTEO" o saludo
-    if (normalizedBody === 'SORTEO' || normalizedBody === '!SORTEO' || normalizedBody === '!MENU' || normalizedBody === 'HOLA') {
+    // Palabra clave "SORTEO", "HOLA", "MENU", etc.
+    if (normalizedBody === 'SORTEO' || normalizedBody === '!SORTEO' || normalizedBody === 'HOLA' || normalizedBody === '!MENU') {
         session.step = 'MENU';
         session.tempData = {};
-        await msg.reply(buildMainMenu(senderPhone));
+        await sendReply(client, senderChatId, buildMainMenu(senderPhone));
         return;
     }
 
-    // Flujo conversacional activo
+    // Si el usuario está dentro de un flujo del menú
     if (session.step !== 'IDLE') {
-        const handled = await handleConversationFlow(msg, rawBody, session, senderPhone, serializedId, client);
+        const handled = await handleConversationFlow(client, senderChatId, rawBody, session, senderPhone);
         if (handled) return;
     }
 
-    // Comandos directos con prefijo "!" en privado
+    // Comandos directos en privado
     if (rawBody.startsWith(config.PREFIX)) {
         const args = rawBody.slice(config.PREFIX.length).trim().split(/\s+/);
         const command = args.shift().toLowerCase();
-        await handleDirectCommand(command, args, msg, senderPhone, serializedId, client);
+        await handleDirectCommand(client, senderChatId, command, args, senderPhone);
         return;
     }
 
-    // Si el usuario escribe algo suelto en privado y no está en menú, sugerir SORTEO
+    // Mensaje libre en privado: ofrecer menú
     if (session.step === 'IDLE') {
-        await msg.reply(
+        await sendReply(
+            client, 
+            senderChatId, 
             `👋 ¡Hola! Para ver las opciones de la *${config.EVENTO_NOMBRE}*, escribe la palabra: *SORTEO*`
         );
     }
 }
 
 // -------------------------------------------------------------
-// MENÚS Y FLUJO CONVERSACIONAL EN PRIVADO
+// MENÚ Y FLUJO CONVERSACIONAL EN PRIVADO
 // -------------------------------------------------------------
 
 function buildMainMenu(phone) {
@@ -201,12 +182,12 @@ function buildAdminMenu() {
     return text;
 }
 
-async function handleConversationFlow(msg, text, session, senderPhone, serializedId, client) {
+async function handleConversationFlow(client, chatId, text, session, senderPhone) {
     const input = text.trim();
 
     if (input === '0' || input.toLowerCase() === 'cancelar' || input.toLowerCase() === 'salir') {
-        resetSession(serializedId);
-        await msg.reply('👋 Menú cerrado. Escribe *SORTEO* cuando quieras volver a ingresar.');
+        resetSession(chatId);
+        await sendReply(client, chatId, '👋 Menú cerrado. Escribe *SORTEO* cuando quieras volver a ingresar.');
         return true;
     }
 
@@ -214,48 +195,52 @@ async function handleConversationFlow(msg, text, session, senderPhone, serialize
         case 'MENU':
             if (input === '1') {
                 session.step = 'WAITING_NUMBER';
-                await msg.reply(
+                await sendReply(
+                    client,
+                    chatId,
                     `🔢 *PASO 1 de 2:*\n\n` +
                     `Escribe el *número* que deseas elegir (por ejemplo: \`042\`):\n\n` +
                     `*(Escribe 0 para cancelar)*`
                 );
                 return true;
             } else if (input === '2') {
-                await cmdLibres(msg, senderPhone, serializedId, client);
-                await msg.reply(`\nEscribe *1* si quieres reservar un número ahora, o *0* para salir.`);
+                await cmdLibres(client, chatId);
+                await sendReply(client, chatId, `\nEscribe *1* si quieres reservar un número ahora, o *0* para salir.`);
                 return true;
             } else if (input === '3') {
-                await cmdMisNumeros(msg, senderPhone, serializedId, client);
+                await cmdMisNumeros(client, chatId, senderPhone);
                 return true;
             } else if (input === '4') {
-                await cmdDatosPago(msg, serializedId, client);
+                await cmdDatosPago(client, chatId);
                 return true;
             } else if (input === '5' && isAdmin(senderPhone)) {
                 session.step = 'ADMIN_MENU';
-                await msg.reply(buildAdminMenu());
+                await sendReply(client, chatId, buildAdminMenu());
                 return true;
             } else {
-                await msg.reply(`⚠️ Opción no válida.\nPor favor escribe un número del menú (1, 2, 3, 4 o 0 para salir):`);
+                await sendReply(client, chatId, `⚠️ Opción no válida.\nPor favor responde con 1, 2, 3, 4 o 0 para salir:`);
                 return true;
             }
 
         case 'WAITING_NUMBER': {
             const num = db.normalizeNumber(input);
             if (!num) {
-                await msg.reply(`❌ Número inválido. Debe ser entre \`${String(config.NUMERO_MIN).padStart(config.DIGITOS_PAD, '0')}\` y \`${config.NUMERO_MAX}\`.\nIntenta con otro número (o 0 para cancelar):`);
+                await sendReply(client, chatId, `❌ Número inválido. Debe ser entre \`${String(config.NUMERO_MIN).padStart(config.DIGITOS_PAD, '0')}\` y \`${config.NUMERO_MAX}\`.\nIntenta con otro número (o 0 para cancelar):`);
                 return true;
             }
 
             const item = db.getNumber(num);
             if (!item || item.estado !== 'LIBRE') {
                 const ocupadoPor = item && item.vecino ? ` por *${item.vecino} (${item.casa})*` : '';
-                await msg.reply(`❌ El número *${num}* ya no está disponible${ocupadoPor}.\n\nPor favor escribe otro número (o 0 para cancelar):`);
+                await sendReply(client, chatId, `❌ El número *${num}* ya no está disponible${ocupadoPor}.\n\nPor favor escribe otro número (o 0 para cancelar):`);
                 return true;
             }
 
             session.tempData.numero = num;
             session.step = 'WAITING_NAME_HOUSE';
-            await msg.reply(
+            await sendReply(
+                client,
+                chatId,
                 `✅ ¡El número *${num}* está libre!\n\n` +
                 `👤 *PASO 2 de 2:*\n` +
                 `Escribe tu *Nombre y Número de Casa*:\n` +
@@ -266,7 +251,7 @@ async function handleConversationFlow(msg, text, session, senderPhone, serialize
 
         case 'WAITING_NAME_HOUSE': {
             if (input.length < 3) {
-                await msg.reply(`⚠️ Por favor escribe tu nombre completo y número de casa (ej: \`Juan Perez Casa 12\`):`);
+                await sendReply(client, chatId, `⚠️ Por favor escribe tu nombre completo y número de casa (ej: \`Juan Perez Casa 12\`):`);
                 return true;
             }
 
@@ -275,10 +260,10 @@ async function handleConversationFlow(msg, text, session, senderPhone, serialize
             const vecino = parts.join(' ') || casa;
 
             const result = db.reserveNumber(session.tempData.numero, vecino, casa, senderPhone);
-            resetSession(serializedId);
+            resetSession(chatId);
 
             if (!result.success) {
-                await msg.reply(`❌ ${result.message}`);
+                await sendReply(client, chatId, `❌ ${result.message}`);
                 return true;
             }
 
@@ -293,18 +278,14 @@ async function handleConversationFlow(msg, text, session, senderPhone, serialize
                 `• *Banco:* ${config.DATOS_PAGO.banco}\n\n` +
                 `⚠️ *Importante:* Envía el comprobante de transferencia al administrador dentro de las *${config.HORAS_LIMITE_PAGO} hs* para confirmar tu jugada. ¡Muchas gracias!`;
 
-            await msg.reply(confirmacion);
+            await sendReply(client, chatId, confirmacion);
 
-            // Anuncio público y limpio en el grupo oficial
             if (config.GRUPO_ID) {
-                try {
-                    await client.sendMessage(
-                        config.GRUPO_ID,
-                        `🎟️ *Nueva reserva:* El vecino *${vecino}* (*${casa}*) acaba de reservar el número *${result.numero}*.`
-                    );
-                } catch (e) {
-                    console.error('[Error avisando al grupo]:', e);
-                }
+                await sendReply(
+                    client,
+                    config.GRUPO_ID,
+                    `🎟️ *Nueva reserva:* El vecino *${vecino}* (*${casa}*) acaba de reservar el número *${result.numero}*.`
+                );
             }
             return true;
         }
@@ -312,40 +293,40 @@ async function handleConversationFlow(msg, text, session, senderPhone, serialize
         case 'ADMIN_MENU':
             if (input === '1') {
                 session.step = 'ADMIN_WAITING_PAY';
-                await msg.reply(`Escribe el número a confirmar como *PAGADO* (ej: \`042\`):`);
+                await sendReply(client, chatId, `Escribe el número a confirmar como *PAGADO* (ej: \`042\`):`);
                 return true;
             } else if (input === '2') {
                 session.step = 'ADMIN_WAITING_RELEASE';
-                await msg.reply(`Escribe el número a *LIBERAR* (ej: \`042\`):`);
+                await sendReply(client, chatId, `Escribe el número a *LIBERAR* (ej: \`042\`):`);
                 return true;
             } else if (input === '3') {
-                await cmdPendientes(msg, serializedId, client);
+                await cmdPendientes(client, chatId);
                 return true;
             } else if (input === '4') {
-                await cmdResumen(msg, serializedId, client);
+                await cmdResumen(client, chatId);
                 return true;
             } else if (input === '5') {
-                await cmdTablero(msg, serializedId, client);
+                await cmdTablero(client, chatId);
                 return true;
             } else if (input === '0') {
                 session.step = 'MENU';
-                await msg.reply(buildMainMenu(senderPhone));
+                await sendReply(client, chatId, buildMainMenu(senderPhone));
                 return true;
             }
             break;
 
         case 'ADMIN_WAITING_PAY': {
             const res = db.confirmPayment(input, senderPhone);
-            resetSession(serializedId);
+            resetSession(chatId);
             if (!res.success) {
-                await msg.reply(`❌ ${res.message}`);
+                await sendReply(client, chatId, `❌ ${res.message}`);
             } else {
-                await msg.reply(`✅ Pago confirmado para el número *${res.numero}* (${res.item.vecino} - ${res.item.casa}).`);
+                await sendReply(client, chatId, `✅ Pago confirmado para el número *${res.numero}* (${res.item.vecino} - ${res.item.casa}).`);
                 if (config.GRUPO_ID) {
-                    await client.sendMessage(config.GRUPO_ID, `🎉 *¡Pago confirmado!* Número *${res.numero}* de *${res.item.vecino}* (*${res.item.casa}*) 🟢 PAGADO.`);
+                    await sendReply(client, config.GRUPO_ID, `🎉 *¡Pago confirmado!* Número *${res.numero}* de *${res.item.vecino}* (*${res.item.casa}*) 🟢 PAGADO.`);
                 }
                 if (res.item.telefono) {
-                    await sendPrivate(client, res.item.telefono, `✅ ¡Hola *${res.item.vecino}*! Tu pago por el número *${res.numero}* ha sido confirmado. ¡Mucha suerte!`);
+                    await sendReply(client, res.item.telefono + '@c.us', `✅ ¡Hola *${res.item.vecino}*! Tu pago por el número *${res.numero}* ha sido confirmado. ¡Mucha suerte!`);
                 }
             }
             return true;
@@ -353,11 +334,11 @@ async function handleConversationFlow(msg, text, session, senderPhone, serialize
 
         case 'ADMIN_WAITING_RELEASE': {
             const res = db.releaseNumber(input);
-            resetSession(serializedId);
+            resetSession(chatId);
             if (!res.success) {
-                await msg.reply(`❌ ${res.message}`);
+                await sendReply(client, chatId, `❌ ${res.message}`);
             } else {
-                await msg.reply(`♻️ Número *${res.numero}* liberado y disponible nuevamente.`);
+                await sendReply(client, chatId, `♻️ Número *${res.numero}* liberado y disponible nuevamente.`);
             }
             return true;
         }
@@ -366,40 +347,36 @@ async function handleConversationFlow(msg, text, session, senderPhone, serialize
     return false;
 }
 
-// -------------------------------------------------------------
-// COMANDOS DIRECTOS
-// -------------------------------------------------------------
-
-async function handleDirectCommand(command, args, msg, senderPhone, serializedId, client) {
+async function handleDirectCommand(client, chatId, command, args, senderPhone) {
     switch (command) {
         case 'ayuda':
         case 'help':
-            await msg.reply(`🎲 Para ver el menú interactivo, escribe: *SORTEO*`);
+            await sendReply(client, chatId, `🎲 Para ver el menú interactivo, escribe: *SORTEO*`);
             break;
 
         case 'libres':
-            await cmdLibres(msg, senderPhone, serializedId, client);
+            await cmdLibres(client, chatId);
             break;
 
         case 'misnumeros':
-            await cmdMisNumeros(msg, senderPhone, serializedId, client);
+            await cmdMisNumeros(client, chatId, senderPhone);
             break;
 
         case 'alias':
         case 'pago':
-            await cmdDatosPago(msg, serializedId, client);
+            await cmdDatosPago(client, chatId);
             break;
 
         case 'pagado':
             if (isAdmin(senderPhone) && args.length > 0) {
                 const res = db.confirmPayment(args[0], senderPhone);
                 if (res.success) {
-                    await msg.reply(`✅ Pago confirmado para el número *${res.numero}*.`);
+                    await sendReply(client, chatId, `✅ Pago confirmado para el número *${res.numero}*.`);
                     if (config.GRUPO_ID) {
-                        await client.sendMessage(config.GRUPO_ID, `🎉 *¡Pago confirmado!* Número *${res.numero}* de *${res.item.vecino}* (*${res.item.casa}*) 🟢 PAGADO.`);
+                        await sendReply(client, config.GRUPO_ID, `🎉 *¡Pago confirmado!* Número *${res.numero}* de *${res.item.vecino}* (*${res.item.casa}*) 🟢 PAGADO.`);
                     }
                 } else {
-                    await msg.reply(`❌ ${res.message}`);
+                    await sendReply(client, chatId, `❌ ${res.message}`);
                 }
             }
             break;
@@ -408,23 +385,23 @@ async function handleDirectCommand(command, args, msg, senderPhone, serializedId
             if (isAdmin(senderPhone) && args.length > 0) {
                 const res = db.releaseNumber(args[0]);
                 if (res.success) {
-                    await msg.reply(`♻️ Número *${res.numero}* liberado.`);
+                    await sendReply(client, chatId, `♻️ Número *${res.numero}* liberado.`);
                 } else {
-                    await msg.reply(`❌ ${res.message}`);
+                    await sendReply(client, chatId, `❌ ${res.message}`);
                 }
             }
             break;
 
         case 'pendientes':
-            if (isAdmin(senderPhone)) await cmdPendientes(msg, serializedId, client);
+            if (isAdmin(senderPhone)) await cmdPendientes(client, chatId);
             break;
 
         case 'resumen':
-            if (isAdmin(senderPhone)) await cmdResumen(msg, serializedId, client);
+            if (isAdmin(senderPhone)) await cmdResumen(client, chatId);
             break;
 
         case 'tablero':
-            if (isAdmin(senderPhone)) await cmdTablero(msg, serializedId, client);
+            if (isAdmin(senderPhone)) await cmdTablero(client, chatId);
             break;
     }
 }
@@ -433,23 +410,23 @@ async function handleDirectCommand(command, args, msg, senderPhone, serializedId
 // FUNCIONES DE CONSULTA
 // -------------------------------------------------------------
 
-async function cmdLibres(msg, senderPhone, serializedId, client) {
+async function cmdLibres(client, chatId) {
     const libres = db.getAvailableNumbers();
     const total = config.NUMERO_MAX - config.NUMERO_MIN + 1;
 
     if (libres.length === 0) {
-        await msg.reply('🔥 ¡Todos los números ya han sido reservados o comprados!');
+        await sendReply(client, chatId, '🔥 ¡Todos los números ya han sido reservados o comprados!');
         return;
     }
 
     const fullListText = `📋 *Números Disponibles (${libres.length}/${total}):*\n\n` + libres.join(' - ');
-    await msg.reply(fullListText);
+    await sendReply(client, chatId, fullListText);
 }
 
-async function cmdMisNumeros(msg, senderPhone, serializedId, client) {
+async function cmdMisNumeros(client, chatId, senderPhone) {
     const userNums = db.getUserNumbers(senderPhone);
     if (userNums.length === 0) {
-        await msg.reply('ℹ️ No tienes ningún número reservado con este teléfono.\nEscribe *1* en el menú para elegir uno.');
+        await sendReply(client, chatId, 'ℹ️ No tienes ningún número reservado con este teléfono.\nEscribe *1* en el menú para elegir uno.');
         return;
     }
 
@@ -458,10 +435,10 @@ async function cmdMisNumeros(msg, senderPhone, serializedId, client) {
         const estadoEmoji = item.estado === 'PAGADO' ? '🟢 PAGADO' : '🟡 PENDIENTE DE PAGO';
         text += `• Número *${item.numero}* -> ${estadoEmoji} (${item.vecino} - ${item.casa})\n`;
     }
-    await msg.reply(text);
+    await sendReply(client, chatId, text);
 }
 
-async function cmdDatosPago(msg, serializedId, client) {
+async function cmdDatosPago(client, chatId) {
     const text = 
         `💳 *DATOS DE PAGO / TRANSFERENCIA* 💳\n\n` +
         `💰 *Valor por número:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')}\n` +
@@ -469,46 +446,33 @@ async function cmdDatosPago(msg, serializedId, client) {
         `• *CBU:* \`${config.DATOS_PAGO.cbu}\`\n` +
         `• *Titular:* ${config.DATOS_PAGO.titular}\n` +
         `• *Banco:* ${config.DATOS_PAGO.banco}`;
-    await msg.reply(text);
+    await sendReply(client, chatId, text);
 }
 
-async function cmdIdGrupo(msg) {
-    try {
-        const chat = await msg.getChat();
-        if (chat.isGroup) {
-            await msg.reply(`🆔 *ID de este Grupo:* \`${chat.id._serialized}\``);
-        } else {
-            await msg.reply(`ℹ️ Este comando debe enviarse dentro de un *grupo de WhatsApp*.`);
-        }
-    } catch {
-        await msg.reply(`ℹ️ No se pudo determinar el ID del grupo.`);
-    }
-}
-
-async function cmdPendientes(msg, serializedId, client) {
+async function cmdPendientes(client, chatId) {
     const pendientes = db.getPendingPayments();
     if (pendientes.length === 0) {
-        await msg.reply('👏 No hay números pendientes de pago.');
+        await sendReply(client, chatId, '👏 No hay números pendientes de pago.');
         return;
     }
     let text = `⏳ *Números Reservados Pendientes de Pago (${pendientes.length}):*\n\n`;
     for (const item of pendientes) {
         text += `• *#${item.numero}* - ${item.vecino} (${item.casa})\n`;
     }
-    await msg.reply(text);
+    await sendReply(client, chatId, text);
 }
 
-async function cmdResumen(msg, serializedId, client) {
+async function cmdResumen(client, chatId) {
     const summary = db.getSummary();
     const text = 
         `📊 *BALANCE GENERAL - ${config.EVENTO_NOMBRE}* 📊\n\n` +
         `• *Total:* ${summary.total} | 🟢 *Pagados:* ${summary.pagados} | 🟡 *Reservados:* ${summary.reservados} | ⚪ *Libres:* ${summary.libres}\n` +
         `💰 *Recaudación Confirmada:* $${summary.recaudado.toLocaleString('es-AR')}\n` +
         `🎯 *Recaudación Potencial:* $${summary.potencial.toLocaleString('es-AR')}`;
-    await msg.reply(text);
+    await sendReply(client, chatId, text);
 }
 
-async function cmdTablero(msg, serializedId, client) {
+async function cmdTablero(client, chatId) {
     const fs = require('fs');
     const path = require('path');
     const raw = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'data', 'quiniela.json'), 'utf-8'));
@@ -518,16 +482,14 @@ async function cmdTablero(msg, serializedId, client) {
         else if (data.estado === 'RESERVADO') text += `[${num}] 🟡 ${data.vecino} (${data.casa}) - Pendiente\n`;
         else if (data.estado === 'PAGADO') text += `[${num}] 🟢 ${data.vecino} (${data.casa}) - Pagado\n`;
     }
-    await msg.reply(text);
+    await sendReply(client, chatId, text);
 }
 
-async function cmdAnuncio(msg, args, client) {
-    if (!config.GRUPO_ID) return;
+async function cmdAnuncio(client, groupId, args) {
     const customText = args.length > 0 ? args.join(' ') : null;
     const messageToSend = scheduler.buildReminderMessage(customText);
     try {
-        await scheduler.sendBroadcast(client, config.GRUPO_ID, messageToSend);
-        await msg.reply('✅ Anuncio enviado exitosamente al grupo.');
+        await scheduler.sendBroadcast(client, groupId, messageToSend);
     } catch (e) {
         console.error('[Error al enviar anuncio]:', e);
     }
