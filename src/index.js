@@ -64,8 +64,7 @@ client.on('ready', () => {
 
 // Evento: Mensajes recibidos (tanto privados como en grupos)
 client.on('message_create', async (msg) => {
-    // Si el mensaje empieza con el prefijo, procesar comando
-    if (msg.body && msg.body.startsWith(config.PREFIX)) {
+    if (msg.body) {
         await commands.handleMessage(msg, client);
     }
 });
