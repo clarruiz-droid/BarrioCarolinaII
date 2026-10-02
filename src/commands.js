@@ -121,36 +121,30 @@ async function handleMessage(msg, client) {
     // 2. SI EL MENSAJE ES EN CHAT PRIVADO
     // =============================================================
 
-    // Palabra clave "SORTEO", "HOLA", "MENU", etc.
-    if (normalizedBody === 'SORTEO' || normalizedBody === '!SORTEO' || normalizedBody === 'HOLA' || normalizedBody === '!MENU') {
+    // Activación ESTRICTA: Solo responde si el mensaje es exactamente "SORTEO"
+    if (normalizedBody === 'SORTEO' || normalizedBody === '!SORTEO') {
         session.step = 'MENU';
         session.tempData = {};
         await sendReply(client, senderChatId, buildMainMenu(senderPhone));
         return;
     }
 
-    // Si el usuario está dentro de un flujo del menú
+    // Si el usuario ya está dentro de una sesión activa del menú (eligiendo opción o número)
     if (session.step !== 'IDLE') {
         const handled = await handleConversationFlow(client, senderChatId, rawBody, session, senderPhone);
         if (handled) return;
     }
 
-    // Comandos directos en privado
-    if (rawBody.startsWith(config.PREFIX)) {
+    // Comandos directos de administrador en privado (con prefijo !)
+    if (rawBody.startsWith(config.PREFIX) && isAdmin(senderPhone)) {
         const args = rawBody.slice(config.PREFIX.length).trim().split(/\s+/);
         const command = args.shift().toLowerCase();
         await handleDirectCommand(client, senderChatId, command, args, senderPhone);
         return;
     }
 
-    // Mensaje libre en privado: ofrecer menú
-    if (session.step === 'IDLE') {
-        await sendReply(
-            client, 
-            senderChatId, 
-            `👋 ¡Hola! Para ver las opciones de la *${config.EVENTO_NOMBRE}*, escribe la palabra: *SORTEO*`
-        );
-    }
+    // SILENCIO TOTAL: Si el usuario escribe cualquier otra cosa y no está en menú, ignorar por completo.
+    return;
 }
 
 // -------------------------------------------------------------
