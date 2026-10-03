@@ -4,6 +4,7 @@ const config = require('./config');
 const db = require('./db');
 const commands = require('./commands');
 const scheduler = require('./scheduler');
+const webhook = require('./webhook');
 
 console.log('====================================================');
 console.log(`🤖 Iniciando Bot: ${config.EVENTO_NOMBRE}`);
@@ -62,6 +63,9 @@ client.on('ready', () => {
 
     // Inicializar el programador de recordatorios automáticos
     scheduler.initScheduler(client);
+
+    // Inicializar el servidor Webhook para auto-acreditación de Mercado Pago
+    webhook.startWebhookServer(client, config.PORT);
 });
 
 // Evento: Mensajes recibidos

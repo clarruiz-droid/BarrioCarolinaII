@@ -35,6 +35,10 @@ async function createPaymentLink(numero, titular = '', monto = null) {
         external_reference: `NUM_${numero}`
     };
 
+    if (config.WEBHOOK_URL && config.WEBHOOK_URL.trim() !== '') {
+        payload.notification_url = config.WEBHOOK_URL.trim();
+    }
+
     try {
         console.log(`[MercadoPago] Creando link de pago para número #${numero} ($${valor})...`);
         const response = await fetch('https://api.mercadopago.com/checkout/preferences', {

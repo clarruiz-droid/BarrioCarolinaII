@@ -40,6 +40,10 @@ module.exports = {
     // Token de acceso de Mercado Pago para generación automática de links de pago
     MP_ACCESS_TOKEN: process.env.MP_ACCESS_TOKEN || "",
 
+    // Configuración del servidor Webhook
+    PORT: parseInt(process.env.PORT || "3000", 10),
+    WEBHOOK_URL: process.env.WEBHOOK_URL || "",
+
     // Prefijo de comandos
     PREFIX: "!"
 };
