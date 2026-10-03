@@ -63,10 +63,10 @@ client.on('ready', () => {
 
     // Inicializar el programador de recordatorios automáticos
     scheduler.initScheduler(client);
-
-    // Inicializar el servidor Webhook para auto-acreditación de Mercado Pago
-    webhook.startWebhookServer(client, config.PORT);
 });
+
+// Inicializar el servidor Webhook para auto-acreditación de Mercado Pago inmediatamente al arrancar
+webhook.startWebhookServer(client, config.PORT);
 
 // Evento: Mensajes recibidos
 client.on('message_create', async (msg) => {
