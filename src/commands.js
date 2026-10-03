@@ -202,6 +202,13 @@ async function handleMessage(msg, client) {
         }
     }
 
+    // Salir o cerrar la conversación
+    if (normalizedBody === 'X' || normalizedBody === 'SALIR' || normalizedBody === 'FIN' || normalizedBody === 'CHAU' || normalizedBody === 'CERRAR' || normalizedBody === 'CANCELAR') {
+        resetSession(senderChatId);
+        await sendReply(client, senderChatId, `👋 ¡Gracias por comunicarte! Cuando quieras volver a consultar o reservar un número, solo escribe *SORTEO*. ¡Que tengas un gran día! 🍀`);
+        return;
+    }
+
     // Apertura o reinicio del menú con SORTEO o MENU
     if (normalizedBody === 'SORTEO' || normalizedBody === '!SORTEO' || normalizedBody === 'MENU' || normalizedBody === '!MENU') {
         session.step = 'MENU';
@@ -253,7 +260,7 @@ function buildMainMenu(isAdminUser) {
     text += `🎲 *Modalidad:* ${modalidadTexto}\n`;
     text += `💰 *Valor del número:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')}\n\n`;
     text += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    text += `📋 *Por favor responde con el número de la opción que deseas:*\n\n`;
+    text += `📋 *Por favor responde con el número de la opción:*\n\n`;
     text += `1️⃣ 🎟️ *Elegir / Reservar un número*\n`;
     text += `2️⃣ 📋 *Ver números disponibles*\n`;
     text += `3️⃣ 🔍 *Consultar mis números y pagos*\n`;
@@ -264,7 +271,8 @@ function buildMainMenu(isAdminUser) {
         text += `6️⃣ 👑 *Menú de Administrador*\n`;
     }
 
-    text += `\n💡 *Responde con el número de la opción (1, 2, 3, 4, 5${isAdminUser ? ' o 6' : ''}).*`;
+    text += `0️⃣ ❌ *Cerrar / Salir*\n\n`;
+    text += `💡 *Escribe el número de la opción (o escribe X para salir).*`;
     return text;
 }
 
@@ -287,9 +295,22 @@ function buildAdminMenu() {
 
 async function handleConversationFlow(client, chatId, text, session, senderPhone, isUserAdmin) {
     const input = text.trim();
+    const upperInput = input.toUpperCase();
+
+    // Salir o cerrar la conversación desde cualquier paso
+    if (upperInput === 'X' || upperInput === 'SALIR' || upperInput === 'FIN' || upperInput === 'CHAU' || upperInput === 'CERRAR' || upperInput === 'CANCELAR') {
+        resetSession(chatId);
+        await sendReply(client, chatId, `👋 ¡Conversación finalizada! Cuando quieras volver a consultar o reservar un número, solo escribe *SORTEO*. ¡Que tengas un gran día! 🍀`);
+        return true;
+    }
 
     // Cancelar o volver atrás en cualquier paso
-    if (input === '0' || input.toUpperCase() === 'VOLVER') {
+    if (input === '0' || upperInput === 'VOLVER') {
+        if (session.step === 'MENU') {
+            resetSession(chatId);
+            await sendReply(client, chatId, `👋 ¡Conversación finalizada! Cuando quieras volver a consultar o reservar un número, solo escribe *SORTEO*. ¡Que tengas un gran día! 🍀`);
+            return true;
+        }
         if (session.step.startsWith('ADMIN_WAITING_')) {
             session.step = 'ADMIN_MENU';
             await sendReply(client, chatId, buildAdminMenu());
