@@ -1,6 +1,7 @@
 const config = require('./config');
 const db = require('./db');
 const scheduler = require('./scheduler');
+const mp = require('./mercadopago');
 
 // Almacenamiento en memoria de las sesiones y pasos de cada usuario
 const userSessions = {};
@@ -462,6 +463,21 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
             return true;
         }
 
+        const paymentLink = await mp.createPaymentLink(result.numero, nombre, config.PRECIO_NUMERO);
+
+        let medioPagoTexto = '';
+        if (paymentLink) {
+            medioPagoTexto += `💳 *Pagar con Mercado Pago (Tarjeta / Débito / Dinero en cuenta):*\n👉 ${paymentLink}\n\n`;
+            medioPagoTexto += `🏦 *O por Transferencia Bancaria:*\n`;
+        } else {
+            medioPagoTexto += `🏦 *Datos para transferir:*\n`;
+        }
+        medioPagoTexto += 
+            `• *Alias:* \`${config.DATOS_PAGO.alias}\`\n` +
+            `• *CBU:* \`${config.DATOS_PAGO.cbu}\`\n` +
+            `• *Titular:* ${config.DATOS_PAGO.titular}\n` +
+            `• *Banco:* ${config.DATOS_PAGO.banco}`;
+
         const confirmacion = 
             `🎉 *¡RESERVA CONFIRMADA!*\n\n` +
             `• 🎟️ *Número:* *${result.numero}*\n` +
@@ -469,11 +485,7 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
             `• 🏠 *Domicilio:* ${domicilio}\n` +
             `• 📱 *Teléfono:* ${telefonoFinal}\n` +
             `• 💰 *Valor:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')}\n\n` +
-            `🏦 *Datos para transferir:*\n` +
-            `• *Alias:* \`${config.DATOS_PAGO.alias}\`\n` +
-            `• *CBU:* \`${config.DATOS_PAGO.cbu}\`\n` +
-            `• *Titular:* ${config.DATOS_PAGO.titular}\n` +
-            `• *Banco:* ${config.DATOS_PAGO.banco}\n\n` +
+            `${medioPagoTexto}\n\n` +
             `⚠️ *Importante:* Envía el comprobante de transferencia al administrador dentro de las *${config.HORAS_LIMITE_PAGO} hs* para confirmar tu jugada.\n\n` +
             `👉 *¿Deseas elegir otro número?* Escribe *1* para reservar otro o *0* para volver al menú principal.`;
 
@@ -488,11 +500,7 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
                 `• 🎟️ *Número:* *${result.numero}*\n` +
                 `• 🏠 *Domicilio:* ${domicilio}\n` +
                 `• 💰 *Valor:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')}\n\n` +
-                `🏦 *Datos para transferir:*\n` +
-                `• *Alias:* \`${config.DATOS_PAGO.alias}\`\n` +
-                `• *CBU:* \`${config.DATOS_PAGO.cbu}\`\n` +
-                `• *Titular:* ${config.DATOS_PAGO.titular}\n` +
-                `• *Banco:* ${config.DATOS_PAGO.banco}\n\n` +
+                `${medioPagoTexto}\n\n` +
                 `⚠️ *Importante:* Envía el comprobante dentro de las *${config.HORAS_LIMITE_PAGO} hs* para confirmar tu jugada.`;
             await sendReply(client, titularWaId, avisoTitular);
         }

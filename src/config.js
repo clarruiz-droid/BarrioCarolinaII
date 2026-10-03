@@ -37,8 +37,8 @@ module.exports = {
     // Programación de recordatorios automáticos (Cron: por defecto a las 11:00 y 19:00 todos los días)
     CRON_RECORDATORIO: process.env.CRON_RECORDATORIO || "0 11,19 * * *",
 
-    // Activar o desactivar recordatorios automáticos
-    RECORDATORIOS_ACTIVOS: process.env.RECORDATORIOS_ACTIVOS === 'true' || process.env.RECORDATORIOS_ACTIVOS === undefined,
+    // Token de acceso de Mercado Pago para generación automática de links de pago
+    MP_ACCESS_TOKEN: process.env.MP_ACCESS_TOKEN || "",
 
     // Prefijo de comandos
     PREFIX: "!"
