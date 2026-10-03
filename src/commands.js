@@ -63,11 +63,27 @@ function isAdmin(phone, msg) {
     if (!config.ADMIN_PHONES || config.ADMIN_PHONES.length === 0) {
         return true;
     }
-    const cleanSender = cleanPhone(phone);
+    const cleanSender = String(phone || '').replace(/\D/g, '');
+    if (!cleanSender) return false;
+
+    const stripCountry = (p) => {
+        let s = String(p || '').replace(/\D/g, '');
+        if (s.startsWith('549')) s = s.slice(3);
+        else if (s.startsWith('54')) s = s.slice(2);
+        return s.replace(/^0+/, '');
+    };
+
+    const senderBase = stripCountry(cleanSender);
+
     return config.ADMIN_PHONES.some(admin => {
-        const cleanAdm = cleanPhone(admin);
-        if (!cleanAdm || !cleanSender) return false;
-        return cleanSender === cleanAdm || cleanSender.endsWith(cleanAdm) || cleanAdm.endsWith(cleanSender);
+        const cleanAdm = String(admin || '').replace(/\D/g, '');
+        if (!cleanAdm) return false;
+        const admBase = stripCountry(cleanAdm);
+
+        return senderBase === admBase || 
+               cleanSender === cleanAdm || 
+               cleanSender.endsWith(admBase) || 
+               cleanAdm.endsWith(senderBase);
     });
 }
 
@@ -76,7 +92,7 @@ function isAdmin(phone, msg) {
  */
 function isBotGeneratedMessage(text) {
     if (!text) return true;
-    const botMarkers = ['🎲', '👋', '✅', '❌', '🎉', '📋', '•', '🔢', '👤', '🏠', '💳', '⏳', '📊', '🔒', '📢', '♻️', 'ℹ️', '⚠️', '👉', '🔙', '👑', '🏆', '🔔', '📱'];
+    const botMarkers = ['🎲', '👋', '✅', '❌', '🎉', '📋', '•', '🔢', '👤', '🏠', '💳', '⏳', '📊', '🔒', '📢', '♻️', 'ℹ️', '⚠️', '👉', '🔙', '👑', '🏆', '🔔', '📱', '━'];
     return botMarkers.some(marker => text.startsWith(marker));
 }
 
@@ -174,6 +190,16 @@ async function handleMessage(msg, client) {
     // =============================================================
     // 2. SI EL MENSAJE ES EN CHAT PRIVADO (O CHAT CON UNO MISMO)
     // =============================================================
+
+    // Apertura directa con ADMIN o !ADMIN
+    if (normalizedBody === 'ADMIN' || normalizedBody === '!ADMIN' || normalizedBody === 'MENU ADMIN') {
+        if (isUserAdmin) {
+            session.step = 'ADMIN_MENU';
+            session.tempData = {};
+            await sendReply(client, senderChatId, buildAdminMenu());
+            return;
+        }
+    }
 
     // Apertura o reinicio del menú con SORTEO o MENU
     if (normalizedBody === 'SORTEO' || normalizedBody === '!SORTEO' || normalizedBody === 'MENU' || normalizedBody === '!MENU') {
