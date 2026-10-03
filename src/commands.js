@@ -58,7 +58,7 @@ function isAdmin(phone, msg) {
  */
 function isBotGeneratedMessage(text) {
     if (!text) return true;
-    const botMarkers = ['🎲', '👋', '✅', '❌', '🎉', '📋', '•', '🔢', '👤', '🏠', '💳', '⏳', '📊', '🔒', '📢', '♻️', 'ℹ️', '⚠️', '👉', '🔙', '👑'];
+    const botMarkers = ['🎲', '👋', '✅', '❌', '🎉', '📋', '•', '🔢', '👤', '🏠', '💳', '⏳', '📊', '🔒', '📢', '♻️', 'ℹ️', '⚠️', '👉', '🔙', '👑', '🏆'];
     return botMarkers.some(marker => text.startsWith(marker));
 }
 
