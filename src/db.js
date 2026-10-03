@@ -77,7 +77,10 @@ function saveRawData(data) {
  * Normaliza y valida si un número es válido dentro del rango
  */
 function normalizeNumber(numInput) {
-    const parsed = parseInt(numInput, 10);
+    if (numInput === null || numInput === undefined) return null;
+    const clean = String(numInput).replace(/\D/g, '');
+    if (!clean && String(numInput).trim() !== '0') return null;
+    const parsed = parseInt(clean, 10);
     if (isNaN(parsed)) return null;
     if (parsed < config.NUMERO_MIN || parsed > config.NUMERO_MAX) return null;
     return padNumber(parsed);
@@ -144,21 +147,37 @@ function reserveNumber(numInput, vecino, casa, telefono) {
 /**
  * Confirma el pago de un número
  */
-function confirmPayment(numInput, adminPhone) {
+function confirmPayment(numInput, adminPhone, vecinoDirecto = null, casaDirecta = null) {
     const numStr = normalizeNumber(numInput);
     if (!numStr) {
-        return { success: false, error: 'NUMERO_INVALIDO', message: 'Número inválido.' };
+        return { success: false, error: 'NUMERO_INVALIDO', message: `Número inválido. Debe ser entre ${padNumber(config.NUMERO_MIN)} y ${padNumber(config.NUMERO_MAX)}.` };
     }
 
     const db = readRawData();
     const item = db.numeros[numStr];
 
-    if (!item || item.estado === 'LIBRE') {
-        return { success: false, error: 'NO_RESERVADO', message: `El número *${numStr}* no tiene ninguna reserva activa para confirmar.` };
+    if (!item) {
+        return { success: false, error: 'NO_EXISTE', message: 'El número no existe.' };
     }
 
     if (item.estado === 'PAGADO') {
-        return { success: false, error: 'YA_PAGADO', message: `El número *${numStr}* ya estaba registrado como pagado.` };
+        return { success: false, error: 'YA_PAGADO', message: `El número *${numStr}* ya estaba registrado como pagado por *${item.vecino}* (${item.casa}).` };
+    }
+
+    if (item.estado === 'LIBRE') {
+        if (!vecinoDirecto) {
+            return { 
+                success: false, 
+                error: 'ES_LIBRE', 
+                needsData: true,
+                numero: numStr,
+                message: `El número *${numStr}* está actualmente LIBRE.` 
+            };
+        }
+        item.vecino = vecinoDirecto.trim();
+        item.casa = (casaDirecta || 'No especificado').trim();
+        item.telefono = null;
+        item.fechaReserva = new Date().toISOString();
     }
 
     item.estado = 'PAGADO';
