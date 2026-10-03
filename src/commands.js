@@ -205,6 +205,10 @@ async function handleMessage(msg, client) {
         return;
     }
 
+    // Cualquier otro mensaje inicial en privado abre el menú con toda la información
+    session.step = 'MENU';
+    session.tempData = {};
+    await sendReply(client, senderChatId, buildMainMenu(isUserAdmin));
     return;
 }
 
@@ -213,13 +217,21 @@ async function handleMessage(msg, client) {
 // -------------------------------------------------------------
 
 function buildMainMenu(isAdminUser) {
+    const premiosTexto = (config.PREMIOS || '').replace(/\\n/g, '\n');
+    const modalidadTexto = (config.MODALIDAD_SORTEO || '').replace(/\\n/g, '\n');
+
     let text = `🎲 *${config.EVENTO_NOMBRE}* 🎲\n\n`;
-    text += `Por favor responde con el *número* de la opción que deseas:\n\n`;
+    text += `🎁 *Premios:*\n${premiosTexto}\n\n`;
+    text += `📅 *Fecha del sorteo:* ${config.FECHA_SORTEO}\n`;
+    text += `🎲 *Modalidad:* ${modalidadTexto}\n`;
+    text += `💰 *Valor del número:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')}\n\n`;
+    text += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    text += `📋 *Por favor responde con el número de la opción que deseas:*\n\n`;
     text += `1️⃣ 🎟️ *Elegir / Reservar un número*\n`;
     text += `2️⃣ 📋 *Ver números disponibles*\n`;
     text += `3️⃣ 🔍 *Consultar mis números y pagos*\n`;
     text += `4️⃣ 💳 *Datos para transferir (Alias/CBU)*\n`;
-    text += `5️⃣ 🏆 *Premios y Modalidad del Sorteo*\n`;
+    text += `5️⃣ 🏆 *Ver premios y bases completas*\n`;
     
     if (isAdminUser) {
         text += `6️⃣ 👑 *Menú de Administrador*\n`;
