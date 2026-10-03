@@ -23,6 +23,11 @@ module.exports = {
     // Tiempo límite sugerido para transferir luego de reservar (en horas)
     HORAS_LIMITE_PAGO: parseInt(process.env.HORAS_LIMITE_PAGO || "24", 10),
 
+    // Configuración de Premios y Modalidad del Sorteo (leídos desde .env)
+    PREMIOS: process.env.PREMIOS || "🥇 1° Premio: A definir\n🥈 2° Premio: A definir",
+    FECHA_SORTEO: process.env.FECHA_SORTEO || "A confirmar al completar los números",
+    MODALIDAD_SORTEO: process.env.MODALIDAD_SORTEO || "Se sortea por Quiniela Nocturna (últimas cifras).",
+
     // Teléfonos de Administradores (formato internacional sin signos, ej: '5491112345678')
     ADMIN_PHONES: (process.env.ADMIN_PHONES || "").split(',').map(p => p.trim()).filter(Boolean),
 

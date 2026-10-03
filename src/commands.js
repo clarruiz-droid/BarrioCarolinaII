@@ -197,12 +197,13 @@ function buildMainMenu(isAdminUser) {
     text += `2️⃣ 📋 *Ver números disponibles*\n`;
     text += `3️⃣ 🔍 *Consultar mis números y pagos*\n`;
     text += `4️⃣ 💳 *Datos para transferir (Alias/CBU)*\n`;
+    text += `5️⃣ 🏆 *Premios y Modalidad del Sorteo*\n`;
     
     if (isAdminUser) {
-        text += `5️⃣ 👑 *Menú de Administrador*\n`;
+        text += `6️⃣ 👑 *Menú de Administrador*\n`;
     }
 
-    text += `\n💡 *Responde con el número de la opción (1, 2, 3, 4${isAdminUser ? ' o 5' : ''}).*`;
+    text += `\n💡 *Responde con el número de la opción (1, 2, 3, 4, 5${isAdminUser ? ' o 6' : ''}).*`;
     return text;
 }
 
@@ -269,12 +270,22 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
             await cmdDatosPago(client, chatId);
             await sendReply(client, chatId, `🔙 _Escribe 0 para volver al menú principal_`);
             return true;
-        } else if (input === '5' && isUserAdmin) {
+        } else if (input === '5') {
+            await cmdPremios(client, chatId);
+            await sendReply(
+                client, 
+                chatId, 
+                `👉 *Opciones:*\n` +
+                `• Escribe *1* para reservar un número\n` +
+                `• Escribe *0* para volver al menú principal`
+            );
+            return true;
+        } else if (input === '6' && isUserAdmin) {
             session.step = 'ADMIN_MENU';
             await sendReply(client, chatId, buildAdminMenu());
             return true;
         } else {
-            const validOptions = isUserAdmin ? '1, 2, 3, 4, 5 o 0' : '1, 2, 3, 4 o 0';
+            const validOptions = isUserAdmin ? '1, 2, 3, 4, 5, 6 o 0' : '1, 2, 3, 4, 5 o 0';
             await sendReply(client, chatId, `⚠️ Opción no válida.\nPor favor responde con ${validOptions} para volver al menú:`);
             return true;
         }
@@ -473,6 +484,12 @@ async function handleDirectCommand(client, chatId, command, args, senderPhone) {
             await cmdDatosPago(client, chatId);
             break;
 
+        case 'premios':
+        case 'sorteo':
+        case 'bases':
+            await cmdPremios(client, chatId);
+            break;
+
         case 'pagado':
             if (args.length > 0) {
                 await cmdPagado(client, chatId, args, senderPhone);
@@ -539,6 +556,19 @@ async function cmdDatosPago(client, chatId) {
         `• *CBU:* \`${config.DATOS_PAGO.cbu}\`\n` +
         `• *Titular:* ${config.DATOS_PAGO.titular}\n` +
         `• *Banco:* ${config.DATOS_PAGO.banco}`;
+    await sendReply(client, chatId, text);
+}
+
+async function cmdPremios(client, chatId) {
+    const premiosTexto = (config.PREMIOS || '').replace(/\\n/g, '\n');
+    const modalidadTexto = (config.MODALIDAD_SORTEO || '').replace(/\\n/g, '\n');
+
+    let text = `🏆 *PREMIOS Y BASES DEL SORTEO* 🏆\n\n`;
+    text += `🎁 *Premios:*\n${premiosTexto}\n\n`;
+    text += `📅 *Fecha del sorteo:* ${config.FECHA_SORTEO}\n`;
+    text += `🎲 *Modalidad:* ${modalidadTexto}\n`;
+    text += `💰 *Valor del número:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')}`;
+    
     await sendReply(client, chatId, text);
 }
 

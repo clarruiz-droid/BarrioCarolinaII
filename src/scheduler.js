@@ -22,6 +22,15 @@ function buildReminderMessage(customText = null) {
         return msg;
     }
 
+    const premiosTexto = (config.PREMIOS || '').replace(/\\n/g, '\n');
+    if (premiosTexto) {
+        msg += `🏆 *Premios:*\n${premiosTexto}\n\n`;
+    }
+
+    if (config.FECHA_SORTEO) {
+        msg += `📅 *Fecha del Sorteo:* ${config.FECHA_SORTEO}\n`;
+    }
+
     msg += `⏳ *Estado actual:* Quedan *${summary.libres} números disponibles* (de ${summary.total}).\n`;
     msg += `💰 *Valor por número:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')}\n\n`;
     
@@ -30,11 +39,7 @@ function buildReminderMessage(customText = null) {
     msg += `📋 *Algunos números libres:* ${muestraLibres}${libres.length > 15 ? '...' : ''}\n\n`;
     
     msg += `👉 *¿Cómo participar?*\n`;
-    msg += `Escribe en este grupo:\n`;
-    msg += `\`!elegir <número> <TuNombre> <TuCasa>\`\n`;
-    msg += `*(Ejemplo: \`!elegir 24 Maria Casa 08\`)*\n\n`;
-    msg += `📋 Para ver la lista completa de números libres: \`!libres\`\n`;
-    msg += `💳 Datos de transferencia: \`!alias\``;
+    msg += `Envíame un mensaje privado con la palabra *SORTEO* para ver el menú interactivo y elegir tu número. 📲`;
 
     return msg;
 }
