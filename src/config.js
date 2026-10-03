@@ -7,7 +7,7 @@ module.exports = {
     // Rango de números (por defecto del 00 al 99)
     NUMERO_MIN: parseInt(process.env.NUMERO_MIN || "0", 10),
     NUMERO_MAX: parseInt(process.env.NUMERO_MAX || "99", 10),
-    DIGITOS_PAD: 2, // Formato "00", "01", ..., "99"
+    DIGITOS_PAD: parseInt(process.env.DIGITOS_PAD || String(process.env.NUMERO_MAX || "99").length, 10),
 
     // Valor de cada número en pesos
     PRECIO_NUMERO: parseInt(process.env.PRECIO_NUMERO || "1000", 10),

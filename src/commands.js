@@ -692,11 +692,10 @@ async function cmdResumen(client, chatId) {
 }
 
 async function cmdTablero(client, chatId) {
-    const fs = require('fs');
-    const path = require('path');
-    const raw = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'data', 'quiniela.json'), 'utf-8'));
+    const raw = db.readRawData();
     let text = `📋 *TABLERO DE NÚMEROS:*\n\n`;
-    for (const [num, data] of Object.entries(raw.numeros)) {
+    const sorted = Object.entries(raw.numeros).sort((a, b) => parseInt(a[0], 10) - parseInt(b[0], 10));
+    for (const [num, data] of sorted) {
         if (data.estado === 'LIBRE') text += `[${num}] ⚪ Libre\n`;
         else if (data.estado === 'RESERVADO') text += `[${num}] 🟡 ${data.vecino} (${data.casa}) - Pendiente\n`;
         else if (data.estado === 'PAGADO') text += `[${num}] 🟢 ${data.vecino} (${data.casa}) - Pagado\n`;

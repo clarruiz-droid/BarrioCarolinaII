@@ -18,6 +18,68 @@ function padNumber(num) {
 }
 
 /**
+ * Sincroniza, limpia claves duplicadas de 2/3 cifras y asegura el orden numérico exacto
+ */
+function syncAndCleanDatabase(data) {
+    let modified = false;
+    if (!data.numeros) data.numeros = {};
+
+    const cleanNumeros = {};
+
+    // 1. Inicializar todas las casillas oficiales del rango en orden estricto
+    for (let i = config.NUMERO_MIN; i <= config.NUMERO_MAX; i++) {
+        const standardKey = padNumber(i);
+        cleanNumeros[standardKey] = {
+            estado: 'LIBRE',
+            vecino: null,
+            casa: null,
+            telefono: null,
+            fechaReserva: null,
+            fechaPago: null,
+            confirmadoPor: null
+        };
+    }
+
+    // 2. Migrar datos existentes (evitando duplicados de 2 y 3 cifras)
+    for (const [rawKey, rawData] of Object.entries(data.numeros)) {
+        const parsed = parseInt(String(rawKey).replace(/\D/g, ''), 10);
+        if (isNaN(parsed) || parsed < config.NUMERO_MIN || parsed > config.NUMERO_MAX) {
+            modified = true;
+            continue; // Descartar si está fuera de rango
+        }
+
+        const standardKey = padNumber(parsed);
+
+        if (rawKey !== standardKey) {
+            modified = true;
+        }
+
+        // Si tenía información (reservado o pagado), preservarla en la clave estándar
+        if (rawData.estado === 'PAGADO') {
+            cleanNumeros[standardKey] = { ...cleanNumeros[standardKey], ...rawData };
+        } else if (rawData.estado === 'RESERVADO' && cleanNumeros[standardKey].estado !== 'PAGADO') {
+            cleanNumeros[standardKey] = { ...cleanNumeros[standardKey], ...rawData };
+        }
+    }
+
+    const oldKeys = Object.keys(data.numeros);
+    const newKeys = Object.keys(cleanNumeros);
+    if (oldKeys.length !== newKeys.length || oldKeys.some((k, idx) => k !== newKeys[idx])) {
+        modified = true;
+    }
+
+    data.numeros = cleanNumeros;
+    data.precioPorNumero = config.PRECIO_NUMERO;
+    data.evento = config.EVENTO_NOMBRE;
+
+    if (modified) {
+        saveRawData(data);
+    }
+
+    return data;
+}
+
+/**
  * Inicializa la base de datos si no existe
  */
 function initDatabase() {
@@ -28,21 +90,7 @@ function initDatabase() {
             precioPorNumero: config.PRECIO_NUMERO,
             numeros: {}
         };
-
-        for (let i = config.NUMERO_MIN; i <= config.NUMERO_MAX; i++) {
-            const numStr = padNumber(i);
-            initialData.numeros[numStr] = {
-                estado: 'LIBRE', // 'LIBRE' | 'RESERVADO' | 'PAGADO'
-                vecino: null,
-                casa: null,
-                telefono: null,
-                fechaReserva: null,
-                fechaPago: null,
-                confirmadoPor: null
-            };
-        }
-
-        saveRawData(initialData);
+        saveRawData(syncAndCleanDatabase(initialData));
         console.log(`[DB] Base de datos creada con números del ${padNumber(config.NUMERO_MIN)} al ${padNumber(config.NUMERO_MAX)}`);
     }
 }
@@ -54,7 +102,8 @@ function readRawData() {
     initDatabase();
     try {
         const raw = fs.readFileSync(DB_FILE, 'utf-8');
-        return JSON.parse(raw);
+        const parsed = JSON.parse(raw);
+        return syncAndCleanDatabase(parsed);
     } catch (error) {
         console.error('[DB Error] No se pudo leer el archivo JSON:', error);
         throw error;
@@ -240,7 +289,7 @@ function getAvailableNumbers() {
             libres.push(num);
         }
     }
-    return libres;
+    return libres.sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
 }
 
 /**
@@ -249,12 +298,14 @@ function getAvailableNumbers() {
 function getUserNumbers(telefono) {
     const db = readRawData();
     const userNums = [];
+    const cleanTarget = String(telefono || '').replace(/\D/g, '');
     for (const [num, data] of Object.entries(db.numeros)) {
-        if (data.telefono === telefono) {
+        const cleanTel = String(data.telefono || '').replace(/\D/g, '');
+        if (cleanTel && (cleanTel === cleanTarget || cleanTel.endsWith(cleanTarget) || cleanTarget.endsWith(cleanTel))) {
             userNums.push({ numero: num, ...data });
         }
     }
-    return userNums;
+    return userNums.sort((a, b) => parseInt(a.numero, 10) - parseInt(b.numero, 10));
 }
 
 /**
@@ -268,7 +319,7 @@ function getPendingPayments() {
             pendientes.push({ numero: num, ...data });
         }
     }
-    return pendientes;
+    return pendientes.sort((a, b) => parseInt(a.numero, 10) - parseInt(b.numero, 10));
 }
 
 /**
@@ -304,6 +355,7 @@ function getSummary() {
 
 module.exports = {
     initDatabase,
+    readRawData,
     normalizeNumber,
     getNumber,
     reserveNumber,
