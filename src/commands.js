@@ -13,7 +13,8 @@ function getSession(userId) {
             lastActivity: Date.now()
         };
     }
-    if (Date.now() - userSessions[userId].lastActivity > 10 * 60 * 1000) {
+    // Si pasaron más de 15 minutos de inactividad, reiniciar a IDLE
+    if (Date.now() - userSessions[userId].lastActivity > 15 * 60 * 1000) {
         userSessions[userId].step = 'IDLE';
         userSessions[userId].tempData = {};
     }
@@ -36,9 +37,6 @@ function isAdmin(phone) {
     return config.ADMIN_PHONES.some(admin => phone.endsWith(admin) || admin.endsWith(phone));
 }
 
-/**
- * Enviar mensaje de forma directa y segura
- */
 async function sendReply(client, chatId, text) {
     try {
         await client.sendMessage(chatId, text);
@@ -49,26 +47,18 @@ async function sendReply(client, chatId, text) {
     }
 }
 
-/**
- * Manejador principal de mensajes entrantes
- */
 async function handleMessage(msg, client) {
-    // Si el mensaje fue enviado por el propio bot, ignorar inmediatamente
     if (msg.fromMe) return;
 
     const rawBody = (msg.body || '').trim();
     if (!rawBody) return;
 
-    // Detectar si es grupo o privado de forma directa y rápida
     const isGroup = msg.from.endsWith('@g.us') || (msg.fromMe && (msg.to || '').endsWith('@g.us'));
     const currentGroupId = isGroup ? (msg.from.endsWith('@g.us') ? msg.from : msg.to) : null;
     
-    // Identificar al remitente
     const senderChatId = isGroup ? (msg.author || msg.from) : msg.from;
     const senderPhone = senderChatId.replace(/@.*/, '');
     const session = getSession(senderChatId);
-
-    console.log(`\n📩 [MSG RECIBIDO] De: ${senderPhone} (${senderChatId}) | Grupo: ${isGroup ? currentGroupId : 'NO (Privado)'} | Texto: "${rawBody}"`);
 
     const normalizedBody = rawBody.toUpperCase();
 
@@ -76,27 +66,22 @@ async function handleMessage(msg, client) {
     // 1. SI EL MENSAJE ES EN UN GRUPO
     // =============================================================
     if (isGroup) {
-        // Comando administrativo para ver el ID
         if (rawBody.toLowerCase() === '!idgrupo') {
             await sendReply(client, currentGroupId, `🆔 *ID de este Grupo:* \`${currentGroupId}\``);
             return;
         }
 
-        // Si hay GRUPO_ID configurado y no coincide con este grupo, ignorar
         if (config.GRUPO_ID && currentGroupId !== config.GRUPO_ID) {
-            console.log(`[Filtro] Mensaje ignorado porque el grupo ${currentGroupId} no coincide con GRUPO_ID (${config.GRUPO_ID})`);
             return;
         }
 
-        // Anuncios manuales del admin en el grupo
         if (rawBody.startsWith('!anuncio') && isAdmin(senderPhone)) {
             const args = rawBody.slice('!anuncio'.length).trim().split(/\s+/);
             await cmdAnuncio(client, currentGroupId, args);
             return;
         }
 
-        // Si escriben SORTEO o comandos en el grupo: avisar e invitar al privado
-        if (normalizedBody === 'SORTEO' || rawBody.startsWith('!')) {
+        if (normalizedBody === 'SORTEO') {
             const botNumber = client.info?.wid?.user;
             const waLink = botNumber ? `\n\n👉 *Haz clic aquí:* https://wa.me/${botNumber}?text=SORTEO` : '';
             
@@ -107,7 +92,6 @@ async function handleMessage(msg, client) {
                 `Por favor envíame un mensaje privado con la palabra *SORTEO*.${waLink}`
             );
 
-            // Iniciar también el menú en su privado
             session.step = 'MENU';
             session.tempData = {};
             await sendReply(client, senderChatId, buildMainMenu(senderPhone));
@@ -121,21 +105,29 @@ async function handleMessage(msg, client) {
     // 2. SI EL MENSAJE ES EN CHAT PRIVADO
     // =============================================================
 
-    // Activación ESTRICTA: Solo responde si el mensaje es exactamente "SORTEO"
-    if (normalizedBody === 'SORTEO' || normalizedBody === '!SORTEO') {
+    // Apertura o reinicio del menú con SORTEO o MENU
+    if (normalizedBody === 'SORTEO' || normalizedBody === '!SORTEO' || normalizedBody === 'MENU' || normalizedBody === '!MENU') {
         session.step = 'MENU';
         session.tempData = {};
         await sendReply(client, senderChatId, buildMainMenu(senderPhone));
         return;
     }
 
-    // Si el usuario ya está dentro de una sesión activa del menú (eligiendo opción o número)
+    // Si el usuario presiona "0" o "VOLVER" en cualquier momento, regresa al menú principal
+    if (normalizedBody === '0' || normalizedBody === 'VOLVER') {
+        session.step = 'MENU';
+        session.tempData = {};
+        await sendReply(client, senderChatId, buildMainMenu(senderPhone));
+        return;
+    }
+
+    // Si el usuario está dentro de una sesión interactiva del menú
     if (session.step !== 'IDLE') {
         const handled = await handleConversationFlow(client, senderChatId, rawBody, session, senderPhone);
         if (handled) return;
     }
 
-    // Comandos directos de administrador en privado (con prefijo !)
+    // Comandos directos de administrador en privado
     if (rawBody.startsWith(config.PREFIX) && isAdmin(senderPhone)) {
         const args = rawBody.slice(config.PREFIX.length).trim().split(/\s+/);
         const command = args.shift().toLowerCase();
@@ -143,12 +135,12 @@ async function handleMessage(msg, client) {
         return;
     }
 
-    // SILENCIO TOTAL: Si el usuario escribe cualquier otra cosa y no está en menú, ignorar por completo.
+    // Silencio ante cualquier otro mensaje fuera del flujo
     return;
 }
 
 // -------------------------------------------------------------
-// MENÚ Y FLUJO CONVERSACIONAL EN PRIVADO
+// MENÚS Y TEXTOS
 // -------------------------------------------------------------
 
 function buildMainMenu(phone) {
@@ -163,186 +155,242 @@ function buildMainMenu(phone) {
         text += `5️⃣ 👑 *Menú de Administrador*\n`;
     }
 
-    text += `0️⃣ ❌ *Salir / Cancelar*`;
+    text += `\n💡 *Responde con el número de la opción (1, 2, 3, 4).*`;
     return text;
 }
 
 function buildAdminMenu() {
     let text = `👑 *MENÚ DE ADMINISTRADOR* 👑\n\n`;
-    text += `Elige una opción:\n`;
+    text += `Elige una opción:\n\n`;
     text += `1️⃣ ✅ *Confirmar pago de un número*\n`;
     text += `2️⃣ ♻️ *Liberar un número*\n`;
     text += `3️⃣ ⏳ *Ver reservas pendientes de pago*\n`;
     text += `4️⃣ 📊 *Ver balance y recaudación*\n`;
-    text += `5️⃣ 📋 *Ver tablero completo*\n`;
+    text += `5️⃣ 📋 *Ver tablero completo*\n\n`;
     text += `0️⃣ 🔙 *Volver al menú principal*`;
     return text;
 }
 
+// -------------------------------------------------------------
+// FLUJO CONVERSACIONAL PASO A PASO
+// -------------------------------------------------------------
+
 async function handleConversationFlow(client, chatId, text, session, senderPhone) {
     const input = text.trim();
 
-    if (input === '0' || input.toLowerCase() === 'cancelar' || input.toLowerCase() === 'salir') {
-        resetSession(chatId);
-        await sendReply(client, chatId, '👋 Menú cerrado. Escribe *SORTEO* cuando quieras volver a ingresar.');
-        return true;
-    }
-
-    switch (session.step) {
-        case 'MENU':
-            if (input === '1') {
-                session.step = 'WAITING_NUMBER';
-                await sendReply(
-                    client,
-                    chatId,
-                    `🔢 *PASO 1 de 2:*\n\n` +
-                    `Escribe el *número* que deseas elegir (por ejemplo: \`042\`):\n\n` +
-                    `*(Escribe 0 para cancelar)*`
-                );
-                return true;
-            } else if (input === '2') {
-                await cmdLibres(client, chatId);
-                await sendReply(client, chatId, `\nEscribe *1* si quieres reservar un número ahora, o *0* para salir.`);
-                return true;
-            } else if (input === '3') {
-                await cmdMisNumeros(client, chatId, senderPhone);
-                return true;
-            } else if (input === '4') {
-                await cmdDatosPago(client, chatId);
-                return true;
-            } else if (input === '5' && isAdmin(senderPhone)) {
-                session.step = 'ADMIN_MENU';
-                await sendReply(client, chatId, buildAdminMenu());
-                return true;
-            } else {
-                await sendReply(client, chatId, `⚠️ Opción no válida.\nPor favor responde con 1, 2, 3, 4 o 0 para salir:`);
-                return true;
-            }
-
-        case 'WAITING_NUMBER': {
-            const num = db.normalizeNumber(input);
-            if (!num) {
-                await sendReply(client, chatId, `❌ Número inválido. Debe ser entre \`${String(config.NUMERO_MIN).padStart(config.DIGITOS_PAD, '0')}\` y \`${config.NUMERO_MAX}\`.\nIntenta con otro número (o 0 para cancelar):`);
-                return true;
-            }
-
-            const item = db.getNumber(num);
-            if (!item || item.estado !== 'LIBRE') {
-                const ocupadoPor = item && item.vecino ? ` por *${item.vecino} (${item.casa})*` : '';
-                await sendReply(client, chatId, `❌ El número *${num}* ya no está disponible${ocupadoPor}.\n\nPor favor escribe otro número (o 0 para cancelar):`);
-                return true;
-            }
-
-            session.tempData.numero = num;
-            session.step = 'WAITING_NAME_HOUSE';
+    // Manejador del Menú Principal
+    if (session.step === 'MENU') {
+        if (input === '1') {
+            session.step = 'WAITING_NUMBER';
+            session.tempData = {};
             await sendReply(
                 client,
                 chatId,
-                `✅ ¡El número *${num}* está libre!\n\n` +
-                `👤 *PASO 2 de 2:*\n` +
-                `Escribe tu *Nombre y Número de Casa*:\n` +
-                `*(Ejemplo: \`Carlos Gomez Casa 18\`)*`
+                `🔢 *PASO 1 de 3: Elección de Número*\n\n` +
+                `Escribe el *número* que deseas reservar (por ejemplo: \`042\`):\n\n` +
+                `🔙 _Escribe 0 para volver al menú principal_`
+            );
+            return true;
+        } else if (input === '2') {
+            await cmdLibres(client, chatId);
+            await sendReply(
+                client, 
+                chatId, 
+                `👉 *Opciones:*\n` +
+                `• Escribe *1* para reservar un número ahora\n` +
+                `• Escribe *0* para volver al menú principal`
+            );
+            return true;
+        } else if (input === '3') {
+            await cmdMisNumeros(client, chatId, senderPhone);
+            await sendReply(client, chatId, `🔙 _Escribe 0 para volver al menú principal_`);
+            return true;
+        } else if (input === '4') {
+            await cmdDatosPago(client, chatId);
+            await sendReply(client, chatId, `🔙 _Escribe 0 para volver al menú principal_`);
+            return true;
+        } else if (input === '5' && isAdmin(senderPhone)) {
+            session.step = 'ADMIN_MENU';
+            await sendReply(client, chatId, buildAdminMenu());
+            return true;
+        } else {
+            await sendReply(client, chatId, `⚠️ Opción no válida.\nPor favor responde con 1, 2, 3, 4 o 0 para volver al menú:`);
+            return true;
+        }
+    }
+
+    // Paso 1: Validando el Número
+    if (session.step === 'WAITING_NUMBER') {
+        const num = db.normalizeNumber(input);
+        if (!num) {
+            await sendReply(
+                client, 
+                chatId, 
+                `❌ Número inválido. Debe ser entre \`${String(config.NUMERO_MIN).padStart(config.DIGITOS_PAD, '0')}\` y \`${config.NUMERO_MAX}\`.\n\n` +
+                `Por favor escribe un número válido (o escribe *0* para volver al menú):`
             );
             return true;
         }
 
-        case 'WAITING_NAME_HOUSE': {
-            if (input.length < 3) {
-                await sendReply(client, chatId, `⚠️ Por favor escribe tu nombre completo y número de casa (ej: \`Juan Perez Casa 12\`):`);
-                return true;
-            }
-
-            const parts = input.split(/\s+/);
-            const casa = parts.pop();
-            const vecino = parts.join(' ') || casa;
-
-            const result = db.reserveNumber(session.tempData.numero, vecino, casa, senderPhone);
-            resetSession(chatId);
-
-            if (!result.success) {
-                await sendReply(client, chatId, `❌ ${result.message}`);
-                return true;
-            }
-
-            const confirmacion = 
-                `🎉 ¡Felicitaciones *${vecino}* (*${casa}*)!\n\n` +
-                `🟡 Reservaste el número: *${result.numero}*\n` +
-                `💰 *Valor:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')}\n\n` +
-                `🏦 *Datos para transferir:*\n` +
-                `• *Alias:* \`${config.DATOS_PAGO.alias}\`\n` +
-                `• *CBU:* \`${config.DATOS_PAGO.cbu}\`\n` +
-                `• *Titular:* ${config.DATOS_PAGO.titular}\n` +
-                `• *Banco:* ${config.DATOS_PAGO.banco}\n\n` +
-                `⚠️ *Importante:* Envía el comprobante de transferencia al administrador dentro de las *${config.HORAS_LIMITE_PAGO} hs* para confirmar tu jugada. ¡Muchas gracias!`;
-
-            await sendReply(client, chatId, confirmacion);
-
-            if (config.GRUPO_ID) {
-                await sendReply(
-                    client,
-                    config.GRUPO_ID,
-                    `🎟️ *Nueva reserva:* El vecino *${vecino}* (*${casa}*) acaba de reservar el número *${result.numero}*.`
-                );
-            }
+        const item = db.getNumber(num);
+        if (!item || item.estado !== 'LIBRE') {
+            const ocupadoPor = item && item.vecino ? ` por *${item.vecino}*` : '';
+            await sendReply(
+                client, 
+                chatId, 
+                `❌ El número *${num}* ya no está disponible${ocupadoPor}.\n\n` +
+                `Por favor escribe otro número libre (o escribe *0* para volver al menú):`
+            );
             return true;
         }
 
-        case 'ADMIN_MENU':
-            if (input === '1') {
-                session.step = 'ADMIN_WAITING_PAY';
-                await sendReply(client, chatId, `Escribe el número a confirmar como *PAGADO* (ej: \`042\`):`);
-                return true;
-            } else if (input === '2') {
-                session.step = 'ADMIN_WAITING_RELEASE';
-                await sendReply(client, chatId, `Escribe el número a *LIBERAR* (ej: \`042\`):`);
-                return true;
-            } else if (input === '3') {
-                await cmdPendientes(client, chatId);
-                return true;
-            } else if (input === '4') {
-                await cmdResumen(client, chatId);
-                return true;
-            } else if (input === '5') {
-                await cmdTablero(client, chatId);
-                return true;
-            } else if (input === '0') {
-                session.step = 'MENU';
-                await sendReply(client, chatId, buildMainMenu(senderPhone));
-                return true;
-            }
-            break;
+        // Guardar número elegido y avanzar al Paso 2
+        session.tempData.numero = num;
+        session.step = 'WAITING_NAME';
+        await sendReply(
+            client,
+            chatId,
+            `✅ ¡El número *${num}* está disponible!\n\n` +
+            `👤 *PASO 2 de 3: Nombre y Apellido*\n` +
+            `Escribe el *Nombre y Apellido* de la persona titular del número:\n` +
+            `*(Ejemplo: \`Carlos Gomez\`)*\n\n` +
+            `🔙 _Escribe 0 para volver al menú principal_`
+        );
+        return true;
+    }
 
-        case 'ADMIN_WAITING_PAY': {
-            const res = db.confirmPayment(input, senderPhone);
-            resetSession(chatId);
-            if (!res.success) {
-                await sendReply(client, chatId, `❌ ${res.message}`);
-            } else {
-                await sendReply(client, chatId, `✅ Pago confirmado para el número *${res.numero}* (${res.item.vecino} - ${res.item.casa}).`);
-                if (config.GRUPO_ID) {
-                    await sendReply(client, config.GRUPO_ID, `🎉 *¡Pago confirmado!* Número *${res.numero}* de *${res.item.vecino}* (*${res.item.casa}*) 🟢 PAGADO.`);
-                }
-                if (res.item.telefono) {
-                    await sendReply(client, res.item.telefono + '@c.us', `✅ ¡Hola *${res.item.vecino}*! Tu pago por el número *${res.numero}* ha sido confirmado. ¡Mucha suerte!`);
-                }
-            }
+    // Paso 2: Validando Nombre y Apellido
+    if (session.step === 'WAITING_NAME') {
+        if (input.length < 3) {
+            await sendReply(client, chatId, `⚠️ Por favor ingresa un nombre y apellido válido (ej: \`Juan Perez\`):\n\n🔙 _Escribe 0 para volver_`);
             return true;
         }
 
-        case 'ADMIN_WAITING_RELEASE': {
-            const res = db.releaseNumber(input);
-            resetSession(chatId);
-            if (!res.success) {
-                await sendReply(client, chatId, `❌ ${res.message}`);
-            } else {
-                await sendReply(client, chatId, `♻️ Número *${res.numero}* liberado y disponible nuevamente.`);
-            }
+        session.tempData.nombre = input;
+        session.step = 'WAITING_ADDRESS';
+        await sendReply(
+            client,
+            chatId,
+            `🏠 *PASO 3 de 3: Domicilio / Dirección*\n\n` +
+            `Escribe el *Domicilio* o *Número de Casa* de la persona:\n` +
+            `*(Ejemplo: \`Barrio Carolina II Casa 18\` o \`Av. Libertador 450\`)*\n\n` +
+            `🔙 _Escribe 0 para volver al menú principal_`
+        );
+        return true;
+    }
+
+    // Paso 3: Validando Domicilio y Guardando la Reserva
+    if (session.step === 'WAITING_ADDRESS') {
+        if (input.length < 2) {
+            await sendReply(client, chatId, `⚠️ Por favor ingresa un domicilio válido:\n\n🔙 _Escribe 0 para volver_`);
+            return true;
+        }
+
+        const domicilio = input;
+        const nombre = session.tempData.nombre;
+        const numero = session.tempData.numero;
+
+        const result = db.reserveNumber(numero, nombre, domicilio, senderPhone);
+        session.step = 'MENU';
+        session.tempData = {};
+
+        if (!result.success) {
+            await sendReply(client, chatId, `❌ ${result.message}\n\n🔙 _Escribe 0 para volver al menú_`);
+            return true;
+        }
+
+        const confirmacion = 
+            `🎉 *¡RESERVA CONFIRMADA!*\n\n` +
+            `• 🎟️ *Número:* *${result.numero}*\n` +
+            `• 👤 *Titular:* ${nombre}\n` +
+            `• 🏠 *Domicilio:* ${domicilio}\n` +
+            `• 💰 *Valor:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')}\n\n` +
+            `🏦 *Datos para transferir:*\n` +
+            `• *Alias:* \`${config.DATOS_PAGO.alias}\`\n` +
+            `• *CBU:* \`${config.DATOS_PAGO.cbu}\`\n` +
+            `• *Titular:* ${config.DATOS_PAGO.titular}\n` +
+            `• *Banco:* ${config.DATOS_PAGO.banco}\n\n` +
+            `⚠️ *Importante:* Envía el comprobante de transferencia al administrador dentro de las *${config.HORAS_LIMITE_PAGO} hs* para confirmar tu jugada.\n\n` +
+            `👉 *¿Deseas elegir otro número?* Escribe *1* para reservar otro o *0* para volver al menú principal.`;
+
+        await sendReply(client, chatId, confirmacion);
+
+        // Anuncio en el grupo oficial si está configurado
+        if (config.GRUPO_ID) {
+            await sendReply(
+                client,
+                config.GRUPO_ID,
+                `🎟️ *Nueva reserva:* Se reservó el número *${result.numero}* a nombre de *${nombre}* (*${domicilio}*).`
+            );
+        }
+        return true;
+    }
+
+    // Submenú de Administrador
+    if (session.step === 'ADMIN_MENU') {
+        if (input === '1') {
+            session.step = 'ADMIN_WAITING_PAY';
+            await sendReply(client, chatId, `Escribe el número a confirmar como *PAGADO* (ej: \`042\`):\n\n🔙 _Escribe 0 para volver_`);
+            return true;
+        } else if (input === '2') {
+            session.step = 'ADMIN_WAITING_RELEASE';
+            await sendReply(client, chatId, `Escribe el número a *LIBERAR* (ej: \`042\`):\n\n🔙 _Escribe 0 para volver_`);
+            return true;
+        } else if (input === '3') {
+            await cmdPendientes(client, chatId);
+            await sendReply(client, chatId, `🔙 _Escribe 0 para volver al menú_`);
+            return true;
+        } else if (input === '4') {
+            await cmdResumen(client, chatId);
+            await sendReply(client, chatId, `🔙 _Escribe 0 para volver al menú_`);
+            return true;
+        } else if (input === '5') {
+            await cmdTablero(client, chatId);
+            await sendReply(client, chatId, `🔙 _Escribe 0 para volver al menú_`);
+            return true;
+        } else if (input === '0') {
+            session.step = 'MENU';
+            await sendReply(client, chatId, buildMainMenu(senderPhone));
             return true;
         }
     }
 
+    if (session.step === 'ADMIN_WAITING_PAY') {
+        const res = db.confirmPayment(input, senderPhone);
+        session.step = 'ADMIN_MENU';
+        if (!res.success) {
+            await sendReply(client, chatId, `❌ ${res.message}\n\n🔙 _Escribe 0 para volver al menú_`);
+        } else {
+            await sendReply(client, chatId, `✅ Pago confirmado para el número *${res.numero}* (${res.item.vecino} - ${res.item.casa}).`);
+            if (config.GRUPO_ID) {
+                await sendReply(client, config.GRUPO_ID, `🎉 *¡Pago confirmado!* Número *${res.numero}* de *${res.item.vecino}* (*${res.item.casa}*) 🟢 PAGADO.`);
+            }
+            if (res.item.telefono) {
+                await sendReply(client, res.item.telefono + '@c.us', `✅ ¡Hola *${res.item.vecino}*! Tu pago por el número *${res.numero}* ha sido confirmado. ¡Mucha suerte!`);
+            }
+            await sendReply(client, chatId, buildAdminMenu());
+        }
+        return true;
+    }
+
+    if (session.step === 'ADMIN_WAITING_RELEASE') {
+        const res = db.releaseNumber(input);
+        session.step = 'ADMIN_MENU';
+        if (!res.success) {
+            await sendReply(client, chatId, `❌ ${res.message}\n\n🔙 _Escribe 0 para volver al menú_`);
+        } else {
+            await sendReply(client, chatId, `♻️ Número *${res.numero}* liberado y disponible nuevamente.`);
+            await sendReply(client, chatId, buildAdminMenu());
+        }
+        return true;
+    }
+
     return false;
 }
+
+// -------------------------------------------------------------
+// COMANDOS DIRECTOS
+// -------------------------------------------------------------
 
 async function handleDirectCommand(client, chatId, command, args, senderPhone) {
     switch (command) {
@@ -423,14 +471,14 @@ async function cmdLibres(client, chatId) {
 async function cmdMisNumeros(client, chatId, senderPhone) {
     const userNums = db.getUserNumbers(senderPhone);
     if (userNums.length === 0) {
-        await sendReply(client, chatId, 'ℹ️ No tienes ningún número reservado con este teléfono.\nEscribe *1* en el menú para elegir uno.');
+        await sendReply(client, chatId, 'ℹ️ No tienes ningún número registrado a nombre de este teléfono.');
         return;
     }
 
-    let text = `🎟️ *Tus números registrados:*\n\n`;
+    let text = `🎟️ *Números registrados desde este teléfono:*\n\n`;
     for (const item of userNums) {
         const estadoEmoji = item.estado === 'PAGADO' ? '🟢 PAGADO' : '🟡 PENDIENTE DE PAGO';
-        text += `• Número *${item.numero}* -> ${estadoEmoji} (${item.vecino} - ${item.casa})\n`;
+        text += `• Número *${item.numero}* -> ${estadoEmoji}\n  Titular: *${item.vecino}* | Domicilio: *${item.casa}*\n`;
     }
     await sendReply(client, chatId, text);
 }
@@ -483,6 +531,7 @@ async function cmdTablero(client, chatId) {
 }
 
 async function cmdAnuncio(client, groupId, args) {
+    if (!groupId) return;
     const customText = args.length > 0 ? args.join(' ') : null;
     const messageToSend = scheduler.buildReminderMessage(customText);
     try {
