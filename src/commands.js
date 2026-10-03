@@ -140,17 +140,28 @@ async function handleMessage(msg, client) {
             return;
         }
 
-        if (config.GRUPO_ID && currentGroupId !== config.GRUPO_ID) {
+        const isAdminGroup = (config.ADMIN_GRUPO_ID && currentGroupId === config.ADMIN_GRUPO_ID);
+        const isPublicGroup = (config.GRUPO_ID && currentGroupId === config.GRUPO_ID);
+
+        // Si hay un grupo de admin configurado y no es el grupo de admin ni el público, ignorar
+        if (config.ADMIN_GRUPO_ID && !isAdminGroup && !isPublicGroup) {
             return;
         }
 
-        // Comandos de administrador en el grupo (ej: !anuncio, !pagado, !pagados, !liberar)
-        if (rawBody.startsWith(config.PREFIX) && isUserAdmin) {
+        // Comandos en el grupo de administración (o ejecutados por un administrador)
+        if (rawBody.startsWith(config.PREFIX) && (isUserAdmin || isAdminGroup)) {
             const args = rawBody.slice(config.PREFIX.length).trim().split(/\s+/);
             const command = args.shift().toLowerCase();
             
             if (command === 'anuncio') {
-                await cmdAnuncio(client, currentGroupId, args);
+                await cmdAnuncio(client, config.GRUPO_ID || currentGroupId, args);
+                if (isAdminGroup && config.GRUPO_ID && config.GRUPO_ID !== currentGroupId) {
+                    await sendReply(client, currentGroupId, `📢 Anuncio enviado exitosamente al grupo de vecinos.`);
+                }
+                return;
+            }
+            if (command === 'invitacion' || command === 'link' || command === 'texto') {
+                await cmdInvitacion(client, currentGroupId);
                 return;
             }
             if (command === 'pagado') {
@@ -161,13 +172,46 @@ async function handleMessage(msg, client) {
                 await cmdPagados(client, currentGroupId);
                 return;
             }
+            if (command === 'pendientes') {
+                await cmdPendientes(client, currentGroupId);
+                return;
+            }
+            if (command === 'resumen' || command === 'balance') {
+                await cmdResumen(client, currentGroupId);
+                return;
+            }
+            if (command === 'tablero') {
+                await cmdTablero(client, currentGroupId);
+                return;
+            }
+            if (command === 'libres') {
+                await cmdLibres(client, currentGroupId);
+                return;
+            }
             if (command === 'liberar') {
                 await cmdLiberar(client, currentGroupId, args);
                 return;
             }
+            if (command === 'ayuda' || command === 'help' || command === 'comandos') {
+                await sendReply(
+                    client,
+                    currentGroupId,
+                    `👑 *COMANDOS DEL GRUPO DE ADMINISTRACIÓN:*\n\n` +
+                    `• \`!pagado <numero>\` ➡️ Confirma el pago de un número.\n` +
+                    `• \`!liberar <numero>\` ➡️ Libera un número reservado.\n` +
+                    `• \`!pendientes\` ➡️ Lista de reservas pendientes de pago.\n` +
+                    `• \`!pagados\` ➡️ Lista de números pagados.\n` +
+                    `• \`!balance\` ➡️ Balance y recaudación total.\n` +
+                    `• \`!tablero\` ➡️ Tablero completo de números.\n` +
+                    `• \`!libres\` ➡️ Lista de números disponibles.\n` +
+                    `• \`!invitacion\` ➡️ Genera el texto con link directo para enviar a vecinos.\n` +
+                    `• \`!anuncio <texto>\` ➡️ Envía un aviso al grupo de vecinos.`
+                );
+                return;
+            }
         }
 
-        // Si alguien escribe SORTEO en el grupo
+        // Si alguien escribe SORTEO en cualquier grupo, lo derivamos al privado con link
         if (normalizedBody === 'SORTEO') {
             const botNumber = client.info?.wid?.user;
             const waLink = botNumber ? `\n\n👉 *Haz clic aquí:* https://wa.me/${botNumber}?text=SORTEO` : '';
@@ -178,10 +222,6 @@ async function handleMessage(msg, client) {
                 `👋 ¡Hola! Para reservar tu número y ver los disponibles, la atención es por *chat privado* 📲.\n\n` +
                 `Por favor envíame un mensaje privado con la palabra *SORTEO*.${waLink}`
             );
-
-            session.step = 'MENU';
-            session.tempData = {};
-            await sendReply(client, senderChatId, buildMainMenu(isUserAdmin));
             return;
         }
 
@@ -515,25 +555,19 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
             await sendReply(client, titularWaId, avisoTitular);
         }
 
-        // Notificar al grupo si está configurado
-        if (config.GRUPO_ID) {
-            await sendReply(
-                client,
-                config.GRUPO_ID,
-                `🎟️ *Nueva reserva:* Se reservó el número *${result.numero}* a nombre de *${nombre}* (*${domicilio}*).`
-            );
-        }
+        // Notificar al Grupo de Administración / Administradores
+        const avisoAdmin = 
+            `🔔 *Aviso Comisión - Nueva Reserva:*\n\n` +
+            `• 🎟️ *Número:* *${result.numero}*\n` +
+            `• 👤 *Titular:* ${nombre}\n` +
+            `• 🏠 *Domicilio:* ${domicilio}\n` +
+            `• 📱 *Teléfono:* ${telefonoFinal}\n` +
+            `• 💰 *Monto:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')}\n` +
+            `• 📲 *Registrado desde:* ${senderPhone}`;
 
-        // Notificar a los administradores
-        if (config.ADMIN_PHONES && config.ADMIN_PHONES.length > 0) {
-            const avisoAdmin = 
-                `🔔 *Aviso Admin - Nueva Reserva:*\n` +
-                `• 🎟️ *Número:* *${result.numero}*\n` +
-                `• 👤 *Titular:* ${nombre}\n` +
-                `• 🏠 *Domicilio:* ${domicilio}\n` +
-                `• 📱 *Teléfono:* ${telefonoFinal}\n` +
-                `• 📲 *Registrado desde:* ${senderPhone}`;
-            
+        if (config.ADMIN_GRUPO_ID) {
+            await sendReply(client, config.ADMIN_GRUPO_ID, avisoAdmin);
+        } else if (config.ADMIN_PHONES && config.ADMIN_PHONES.length > 0) {
             for (const admin of config.ADMIN_PHONES) {
                 const adminWaId = formatWhatsAppId(admin);
                 if (adminWaId && adminWaId !== chatId) {
@@ -933,10 +967,13 @@ async function cmdTablero(client, chatId) {
 async function cmdPagado(client, targetChat, args, adminPhone) {
     const res = db.confirmPayment(args[0], adminPhone);
     if (res.success) {
-        await sendReply(client, targetChat, `✅ *¡Pago Confirmado!* Número *${res.numero}* (${res.item.vecino} - ${res.item.casa}) 🟢 PAGADO.`);
-        if (config.GRUPO_ID && targetChat !== config.GRUPO_ID) {
-            await sendReply(client, config.GRUPO_ID, `🎉 *¡Pago confirmado!* Número *${res.numero}* de *${res.item.vecino}* (*${res.item.casa}*) 🟢 PAGADO.`);
+        await sendReply(client, targetChat, `✅ *¡Pago Confirmado!* Número *${res.numero}* (${res.item.vecino} - ${res.item.casa}) registrado como 🟢 *PAGADO*.`);
+        
+        // Si se ejecutó desde privado y hay grupo de admin, avisar al grupo de admin
+        if (config.ADMIN_GRUPO_ID && targetChat !== config.ADMIN_GRUPO_ID) {
+            await sendReply(client, config.ADMIN_GRUPO_ID, `💰 *Pago Confirmado:* Número *${res.numero}* de *${res.item.vecino}* (*${res.item.casa}*) 🟢 PAGADO.`);
         }
+
         if (res.item.telefono) {
             const titularWaId = formatWhatsAppId(res.item.telefono);
             if (titularWaId) {
@@ -951,13 +988,34 @@ async function cmdPagado(client, targetChat, args, adminPhone) {
                     `• 🟢 *Estado:* PAGADO\n\n` +
                     `🎁 *Premios:*\n${premiosTexto}\n\n` +
                     `📅 *Fecha de sorteo:* ${config.FECHA_SORTEO}\n` +
-                    `¡Mucha suerte!`;
+                    `¡Mucha suerte! 🍀`;
                 await sendReply(client, titularWaId, reciboMsg);
             }
         }
     } else {
         await sendReply(client, targetChat, `❌ ${res.message}`);
     }
+}
+
+async function cmdInvitacion(client, chatId) {
+    const botNumber = client.info?.wid?.user;
+    const waLink = botNumber ? `https://wa.me/${botNumber}?text=SORTEO` : '(Envía un mensaje privado con la palabra SORTEO a este número)';
+    const premiosTexto = (config.PREMIOS || '').replace(/\\n/g, '\n');
+    const modalidadTexto = (config.MODALIDAD_SORTEO || '').replace(/\\n/g, '\n');
+
+    const texto = 
+        `🎲 *¡${config.EVENTO_NOMBRE.toUpperCase()}!* 🎲\n\n` +
+        `Vecinos/as, ya están habilitados los números para participar del sorteo pro-mejoras del barrio.\n\n` +
+        `🎁 *Premios:*\n${premiosTexto}\n\n` +
+        `💰 *Valor:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')} por número\n` +
+        `📅 *Fecha de sorteo:* ${config.FECHA_SORTEO}\n` +
+        `🎲 *Modalidad:* ${modalidadTexto}\n\n` +
+        `👉 *¿Cómo elegir y reservar tu número?*\n` +
+        `Para ver los números disponibles y reservar el tuyo en 1 minuto, haz clic en el siguiente enlace y envíale la palabra *SORTEO* a nuestro asistente automático:\n\n` +
+        `📲 *Haz clic aquí para reservar:* ${waLink}\n\n` +
+        `_(El Bot te atenderá por chat privado al instante)_ 🍀`;
+
+    await sendReply(client, chatId, texto);
 }
 
 async function cmdLiberar(client, targetChat, args) {

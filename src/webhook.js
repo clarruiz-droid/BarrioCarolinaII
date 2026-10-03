@@ -123,26 +123,23 @@ async function processApprovedPayment(client, paymentData) {
         }
     }
 
-    // 2. Notificar al grupo de WhatsApp
-    if (config.GRUPO_ID) {
-        await sendWhatsApp(
-            client, 
-            config.GRUPO_ID, 
-            `🎉 *¡Pago confirmado vía Mercado Pago!* Número *${res.numero}* de *${titularNombre}* (*${domicilio}*) 🟢 PAGADO.`
-        );
+    // 2. Notificar a los administradores y al grupo de administración
+    const avisoAdmin = 
+        `💰 *Aviso Comisión - Pago Acreditado (Mercado Pago)* 🟢\n\n` +
+        `• 🎟️ *Número:* *${res.numero}*\n` +
+        `• 👤 *Titular:* ${titularNombre}\n` +
+        `• 🏠 *Domicilio:* ${domicilio}\n` +
+        `• 📱 *Teléfono:* ${res.item.telefono || 'N/A'}\n` +
+        `• 💵 *Monto:* $${(paymentData.transaction_amount || config.PRECIO_NUMERO).toLocaleString('es-AR')}\n` +
+        `• 🆔 *ID Operación MP:* \`${paymentId}\``;
+
+    // Enviar al Grupo de Administradores
+    if (config.ADMIN_GRUPO_ID) {
+        await sendWhatsApp(client, config.ADMIN_GRUPO_ID, avisoAdmin);
     }
 
-    // 3. Notificar a los administradores
-    if (config.ADMIN_PHONES && config.ADMIN_PHONES.length > 0) {
-        const avisoAdmin = 
-            `💰 *Aviso Admin - Pago Acreditado (Mercado Pago)* 🟢\n\n` +
-            `• 🎟️ *Número:* *${res.numero}*\n` +
-            `• 👤 *Titular:* ${titularNombre}\n` +
-            `• 🏠 *Domicilio:* ${domicilio}\n` +
-            `• 📱 *Teléfono:* ${res.item.telefono || 'N/A'}\n` +
-            `• 💵 *Monto:* $${paymentData.transaction_amount || config.PRECIO_NUMERO}\n` +
-            `• 🆔 *ID Operación MP:* \`${paymentId}\``;
-
+    // Enviar a los teléfonos de administradores individuales si no hay grupo de admin
+    if (!config.ADMIN_GRUPO_ID && config.ADMIN_PHONES && config.ADMIN_PHONES.length > 0) {
         for (const admin of config.ADMIN_PHONES) {
             const adminWaId = formatWhatsAppId(admin);
             if (adminWaId) {

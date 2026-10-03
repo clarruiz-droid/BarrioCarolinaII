@@ -31,7 +31,10 @@ module.exports = {
     // Teléfonos de Administradores (formato internacional sin signos, ej: '5491112345678')
     ADMIN_PHONES: (process.env.ADMIN_PHONES || "").split(',').map(p => p.trim()).filter(Boolean),
 
-    // ID del grupo de WhatsApp para recordatorios automáticos (ej: '120363012345678@g.us')
+    // ID del grupo de WhatsApp de Administradores (para recibir alertas y gestionar el sorteo)
+    ADMIN_GRUPO_ID: process.env.ADMIN_GRUPO_ID || process.env.GRUPO_ID || "",
+
+    // ID del grupo de WhatsApp público (opcional, para anuncios)
     GRUPO_ID: process.env.GRUPO_ID || "",
 
     // Programación de recordatorios automáticos (Cron: por defecto a las 11:00 y 19:00 todos los días)
