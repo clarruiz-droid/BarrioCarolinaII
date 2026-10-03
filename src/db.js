@@ -196,7 +196,7 @@ function reserveNumber(numInput, vecino, casa, telefono) {
 /**
  * Confirma el pago de un número
  */
-function confirmPayment(numInput, adminPhone, vecinoDirecto = null, casaDirecta = null) {
+function confirmPayment(numInput, adminPhone, vecinoDirecto = null, casaDirecta = null, telefonoDirecto = null) {
     const numStr = normalizeNumber(numInput);
     if (!numStr) {
         return { success: false, error: 'NUMERO_INVALIDO', message: `Número inválido. Debe ser entre ${padNumber(config.NUMERO_MIN)} y ${padNumber(config.NUMERO_MAX)}.` };
@@ -225,7 +225,7 @@ function confirmPayment(numInput, adminPhone, vecinoDirecto = null, casaDirecta 
         }
         item.vecino = vecinoDirecto.trim();
         item.casa = (casaDirecta || 'No especificado').trim();
-        item.telefono = null;
+        item.telefono = telefonoDirecto ? String(telefonoDirecto).trim() : null;
         item.fechaReserva = new Date().toISOString();
     }
 

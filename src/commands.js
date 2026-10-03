@@ -38,6 +38,24 @@ function cleanPhone(num) {
     return cleaned;
 }
 
+function formatPhoneNumber(phone) {
+    if (!phone) return null;
+    let clean = String(phone).replace(/\D/g, '');
+    if (!clean || clean.length < 8) return null;
+    if (clean.startsWith('54') && !clean.startsWith('549')) {
+        clean = '549' + clean.slice(2);
+    } else if (!clean.startsWith('54')) {
+        clean = '549' + clean;
+    }
+    return clean;
+}
+
+function formatWhatsAppId(phone) {
+    const formatted = formatPhoneNumber(phone);
+    if (!formatted) return null;
+    return formatted + '@c.us';
+}
+
 function isAdmin(phone, msg) {
     if (msg && msg.fromMe) {
         return true;
@@ -58,7 +76,7 @@ function isAdmin(phone, msg) {
  */
 function isBotGeneratedMessage(text) {
     if (!text) return true;
-    const botMarkers = ['🎲', '👋', '✅', '❌', '🎉', '📋', '•', '🔢', '👤', '🏠', '💳', '⏳', '📊', '🔒', '📢', '♻️', 'ℹ️', '⚠️', '👉', '🔙', '👑', '🏆'];
+    const botMarkers = ['🎲', '👋', '✅', '❌', '🎉', '📋', '•', '🔢', '👤', '🏠', '💳', '⏳', '📊', '🔒', '📢', '♻️', 'ℹ️', '⚠️', '👉', '🔙', '👑', '🏆', '🔔', '📱'];
     return botMarkers.some(marker => text.startsWith(marker));
 }
 
@@ -247,7 +265,7 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
             await sendReply(
                 client,
                 chatId,
-                `🔢 *PASO 1 de 3: Elección de Número*\n\n` +
+                `🔢 *PASO 1 de 4: Elección de Número*\n\n` +
                 `Escribe el *número* que deseas reservar (por ejemplo: \`042\`):\n\n` +
                 `🔙 _Escribe 0 para volver al menú principal_`
             );
@@ -322,7 +340,7 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
             client,
             chatId,
             `✅ ¡El número *${num}* está disponible!\n\n` +
-            `👤 *PASO 2 de 3: Nombre y Apellido*\n` +
+            `👤 *PASO 2 de 4: Nombre y Apellido*\n` +
             `Escribe el *Nombre y Apellido* de la persona titular del número:\n` +
             `*(Ejemplo: \`Carlos Gomez\`)*\n\n` +
             `🔙 _Escribe 0 para volver al menú principal_`
@@ -342,7 +360,7 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
         await sendReply(
             client,
             chatId,
-            `🏠 *PASO 3 de 3: Domicilio / Dirección*\n\n` +
+            `🏠 *PASO 3 de 4: Domicilio / Dirección*\n\n` +
             `Escribe el *Domicilio* o *Número de Casa* de la persona:\n` +
             `*(Ejemplo: \`Barrio Carolina II Casa 18\` o \`Av. Libertador 450\`)*\n\n` +
             `🔙 _Escribe 0 para volver al menú principal_`
@@ -350,18 +368,49 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
         return true;
     }
 
-    // Paso 3: Validando Domicilio y Guardando la Reserva
+    // Paso 3: Validando Domicilio
     if (session.step === 'WAITING_ADDRESS') {
         if (input.length < 2) {
             await sendReply(client, chatId, `⚠️ Por favor ingresa un domicilio válido:\n\n🔙 _Escribe 0 para volver_`);
             return true;
         }
 
-        const domicilio = input;
+        session.tempData.domicilio = input;
+        session.step = 'WAITING_PHONE';
+        await sendReply(
+            client,
+            chatId,
+            `📱 *PASO 4 de 4: Teléfono de WhatsApp*\n\n` +
+            `Escribe el *número de celular* de la persona para enviarle las confirmaciones por WhatsApp:\n` +
+            `*(Ejemplo: \`2644863938\` o escribe \`-\` para usar este mismo teléfono)*\n\n` +
+            `🔙 _Escribe 0 para volver al menú principal_`
+        );
+        return true;
+    }
+
+    // Paso 4: Validando Teléfono y Guardando la Reserva
+    if (session.step === 'WAITING_PHONE') {
+        let telefonoFinal = senderPhone;
+        const cleanInput = input.trim();
+
+        if (cleanInput && cleanInput !== '-' && cleanInput !== '0') {
+            const formatted = formatPhoneNumber(cleanInput);
+            if (!formatted || cleanPhone(cleanInput).length < 8) {
+                await sendReply(
+                    client,
+                    chatId,
+                    `⚠️ Número de teléfono no válido.\nPor favor ingresa un número de celular con código de área (ej: \`2644863938\`) o escribe \`-\` para usar este mismo teléfono:\n\n🔙 _Escribe 0 para volver al menú_`
+                );
+                return true;
+            }
+            telefonoFinal = formatted;
+        }
+
         const nombre = session.tempData.nombre;
         const numero = session.tempData.numero;
+        const domicilio = session.tempData.domicilio;
 
-        const result = db.reserveNumber(numero, nombre, domicilio, senderPhone);
+        const result = db.reserveNumber(numero, nombre, domicilio, telefonoFinal);
         session.step = 'MENU';
         session.tempData = {};
 
@@ -375,6 +424,7 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
             `• 🎟️ *Número:* *${result.numero}*\n` +
             `• 👤 *Titular:* ${nombre}\n` +
             `• 🏠 *Domicilio:* ${domicilio}\n` +
+            `• 📱 *Teléfono:* ${telefonoFinal}\n` +
             `• 💰 *Valor:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')}\n\n` +
             `🏦 *Datos para transferir:*\n` +
             `• *Alias:* \`${config.DATOS_PAGO.alias}\`\n` +
@@ -386,12 +436,49 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
 
         await sendReply(client, chatId, confirmacion);
 
+        // Notificar al titular por WhatsApp si es un teléfono diferente al que escribió
+        const titularWaId = formatWhatsAppId(telefonoFinal);
+        if (titularWaId && titularWaId !== chatId) {
+            const avisoTitular = 
+                `🎉 *¡RESERVA CONFIRMADA - ${config.EVENTO_NOMBRE}!*\n\n` +
+                `Hola *${nombre}*, te informamos que se reservó a tu nombre el número:\n` +
+                `• 🎟️ *Número:* *${result.numero}*\n` +
+                `• 🏠 *Domicilio:* ${domicilio}\n` +
+                `• 💰 *Valor:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')}\n\n` +
+                `🏦 *Datos para transferir:*\n` +
+                `• *Alias:* \`${config.DATOS_PAGO.alias}\`\n` +
+                `• *CBU:* \`${config.DATOS_PAGO.cbu}\`\n` +
+                `• *Titular:* ${config.DATOS_PAGO.titular}\n` +
+                `• *Banco:* ${config.DATOS_PAGO.banco}\n\n` +
+                `⚠️ *Importante:* Envía el comprobante dentro de las *${config.HORAS_LIMITE_PAGO} hs* para confirmar tu jugada.`;
+            await sendReply(client, titularWaId, avisoTitular);
+        }
+
+        // Notificar al grupo si está configurado
         if (config.GRUPO_ID) {
             await sendReply(
                 client,
                 config.GRUPO_ID,
                 `🎟️ *Nueva reserva:* Se reservó el número *${result.numero}* a nombre de *${nombre}* (*${domicilio}*).`
             );
+        }
+
+        // Notificar a los administradores
+        if (config.ADMIN_PHONES && config.ADMIN_PHONES.length > 0) {
+            const avisoAdmin = 
+                `🔔 *Aviso Admin - Nueva Reserva:*\n` +
+                `• 🎟️ *Número:* *${result.numero}*\n` +
+                `• 👤 *Titular:* ${nombre}\n` +
+                `• 🏠 *Domicilio:* ${domicilio}\n` +
+                `• 📱 *Teléfono:* ${telefonoFinal}\n` +
+                `• 📲 *Registrado desde:* ${senderPhone}`;
+            
+            for (const admin of config.ADMIN_PHONES) {
+                const adminWaId = formatWhatsAppId(admin);
+                if (adminWaId && adminWaId !== chatId) {
+                    await sendReply(client, adminWaId, avisoAdmin);
+                }
+            }
         }
         return true;
     }
@@ -406,7 +493,7 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
                 chatId, 
                 `🔢 *CONFIRMAR O REGISTRAR PAGO*\n\n` +
                 `Escribe el *número* a cobrar o confirmar (ej: \`042\`):\n\n` +
-                `💡 _Si el número ya está reservado se confirmará el pago directamente. Si está libre, te pedirá el nombre para registrar la venta._\n\n` +
+                `💡 _Si el número ya está reservado se confirmará el pago directamente. Si está libre, te pedirá los datos para registrar la venta._\n\n` +
                 `🔙 _Escribe 0 para volver_`
             );
             return true;
@@ -467,11 +554,28 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
             session.step = 'ADMIN_MENU';
             session.tempData = {};
             await sendReply(client, chatId, `✅ *¡Pago Confirmado!* Número *${res.numero}* (${res.item.vecino} - ${res.item.casa}) registrado como 🟢 *PAGADO*.`);
+            
             if (config.GRUPO_ID) {
                 await sendReply(client, config.GRUPO_ID, `🎉 *¡Pago confirmado!* Número *${res.numero}* de *${res.item.vecino}* (*${res.item.casa}*) 🟢 PAGADO.`);
             }
+            
             if (res.item.telefono) {
-                await sendReply(client, res.item.telefono + '@c.us', `✅ ¡Hola *${res.item.vecino}*! Tu pago por el número *${res.numero}* ha sido confirmado. ¡Mucha suerte!`);
+                const titularWaId = formatWhatsAppId(res.item.telefono);
+                if (titularWaId) {
+                    const premiosTexto = (config.PREMIOS || '').replace(/\\n/g, '\n');
+                    const reciboMsg = 
+                        `🎉 *¡PAGO CONFIRMADO!* 🟢\n\n` +
+                        `Hola *${res.item.vecino}*, te confirmamos que tu pago por el número *${res.numero}* ha sido registrado correctamente.\n\n` +
+                        `• 🎟️ *Número:* *${res.numero}*\n` +
+                        `• 👤 *Titular:* ${res.item.vecino}\n` +
+                        `• 🏠 *Domicilio:* ${res.item.casa}\n` +
+                        `• 💰 *Monto:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')}\n` +
+                        `• 🟢 *Estado:* PAGADO\n\n` +
+                        `🎁 *Premios:*\n${premiosTexto}\n\n` +
+                        `📅 *Fecha de sorteo:* ${config.FECHA_SORTEO}\n` +
+                        `¡Mucha suerte!`;
+                    await sendReply(client, titularWaId, reciboMsg);
+                }
             }
             await sendReply(client, chatId, buildAdminMenu());
             return true;
@@ -485,7 +589,7 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
                 client, 
                 chatId, 
                 `ℹ️ El número *${num}* está actualmente *LIBRE*.\n\n` +
-                `👤 *Paso 1 de 2: Nombre y Apellido*\n` +
+                `👤 *Paso 1 de 3: Nombre y Apellido*\n` +
                 `Escribe el *Nombre y Apellido* del comprador para registrar la venta directa:\n\n` +
                 `🔙 _Escribe 0 para volver_`
             );
@@ -503,7 +607,7 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
         await sendReply(
             client, 
             chatId, 
-            `🏠 *Paso 2 de 2: Domicilio / Casa*\n` +
+            `🏠 *Paso 2 de 3: Domicilio / Casa*\n` +
             `Escribe el *Domicilio* o *Número de Casa* de *${input}* (o escribe \`-\` si no lo sabes):\n\n` +
             `🔙 _Escribe 0 para cancelar_`
         );
@@ -511,11 +615,30 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
     }
 
     if (session.step === 'ADMIN_DIRECT_PAY_ADDRESS') {
-        const domicilio = (input === '-' || input.trim() === '') ? 'Barrio Carolina II' : input;
+        session.tempData.domicilio = (input === '-' || input.trim() === '') ? 'Barrio Carolina II' : input;
+        session.step = 'ADMIN_DIRECT_PAY_PHONE';
+        await sendReply(
+            client,
+            chatId,
+            `📱 *Paso 3 de 3: Teléfono de WhatsApp*\n` +
+            `Escribe el *número de celular* del comprador para enviarle el comprobante (o escribe \`-\` si no tiene):\n\n` +
+            `🔙 _Escribe 0 para cancelar_`
+        );
+        return true;
+    }
+
+    if (session.step === 'ADMIN_DIRECT_PAY_PHONE') {
+        let telefonoFinal = null;
+        const cleanInput = input.trim();
+        if (cleanInput && cleanInput !== '-' && cleanInput !== '0') {
+            telefonoFinal = formatPhoneNumber(cleanInput) || cleanInput;
+        }
+
         const nombre = session.tempData.nombre;
         const numero = session.tempData.numero;
+        const domicilio = session.tempData.domicilio;
 
-        const res = db.confirmPayment(numero, senderPhone, nombre, domicilio);
+        const res = db.confirmPayment(numero, senderPhone, nombre, domicilio, telefonoFinal);
         session.step = 'ADMIN_MENU';
         session.tempData = {};
 
@@ -529,11 +652,30 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
                 `• 🎟️ *Número:* *${res.numero}*\n` +
                 `• 👤 *Titular:* ${nombre}\n` +
                 `• 🏠 *Domicilio:* ${domicilio}\n` +
+                `• 📱 *Teléfono:* ${telefonoFinal || 'No registrado'}\n` +
                 `• 💰 *Valor:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')}\n` +
                 `• 🟢 *Estado:* PAGADO`
             );
             if (config.GRUPO_ID) {
                 await sendReply(client, config.GRUPO_ID, `🎉 *¡Nuevo número vendido!* Número *${res.numero}* de *${nombre}* (*${domicilio}*) 🟢 PAGADO.`);
+            }
+            if (telefonoFinal) {
+                const titularWaId = formatWhatsAppId(telefonoFinal);
+                if (titularWaId) {
+                    const premiosTexto = (config.PREMIOS || '').replace(/\\n/g, '\n');
+                    const reciboMsg = 
+                        `🎉 *¡PAGO CONFIRMADO - COMPROBANTE!* 🟢\n\n` +
+                        `Hola *${nombre}*, te confirmamos el pago de tu número para el *${config.EVENTO_NOMBRE}*:\n\n` +
+                        `• 🎟️ *Número:* *${res.numero}*\n` +
+                        `• 👤 *Titular:* ${nombre}\n` +
+                        `• 🏠 *Domicilio:* ${domicilio}\n` +
+                        `• 💰 *Monto Pagado:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')}\n` +
+                        `• 🟢 *Estado:* PAGADO\n\n` +
+                        `🎁 *Premios:*\n${premiosTexto}\n\n` +
+                        `📅 *Fecha de sorteo:* ${config.FECHA_SORTEO}\n` +
+                        `¡Muchas gracias por colaborar y mucha suerte!`;
+                    await sendReply(client, titularWaId, reciboMsg);
+                }
             }
             await sendReply(client, chatId, buildAdminMenu());
         }
@@ -711,7 +853,22 @@ async function cmdPagado(client, targetChat, args, adminPhone) {
             await sendReply(client, config.GRUPO_ID, `🎉 *¡Pago confirmado!* Número *${res.numero}* de *${res.item.vecino}* (*${res.item.casa}*) 🟢 PAGADO.`);
         }
         if (res.item.telefono) {
-            await sendReply(client, res.item.telefono + '@c.us', `✅ ¡Hola *${res.item.vecino}*! Tu pago por el número *${res.numero}* ha sido confirmado.`);
+            const titularWaId = formatWhatsAppId(res.item.telefono);
+            if (titularWaId) {
+                const premiosTexto = (config.PREMIOS || '').replace(/\\n/g, '\n');
+                const reciboMsg = 
+                    `🎉 *¡PAGO CONFIRMADO!* 🟢\n\n` +
+                    `Hola *${res.item.vecino}*, te confirmamos que tu pago por el número *${res.numero}* ha sido registrado correctamente.\n\n` +
+                    `• 🎟️ *Número:* *${res.numero}*\n` +
+                    `• 👤 *Titular:* ${res.item.vecino}\n` +
+                    `• 🏠 *Domicilio:* ${res.item.casa}\n` +
+                    `• 💰 *Monto:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')}\n` +
+                    `• 🟢 *Estado:* PAGADO\n\n` +
+                    `🎁 *Premios:*\n${premiosTexto}\n\n` +
+                    `📅 *Fecha de sorteo:* ${config.FECHA_SORTEO}\n` +
+                    `¡Mucha suerte!`;
+                await sendReply(client, titularWaId, reciboMsg);
+            }
         }
     } else {
         await sendReply(client, targetChat, `❌ ${res.message}`);
