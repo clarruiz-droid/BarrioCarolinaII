@@ -29,11 +29,28 @@ function resetSession(userId) {
     };
 }
 
-function isAdmin(phone) {
+function cleanPhone(num) {
+    if (!num) return '';
+    let cleaned = String(num).replace(/\D/g, '');
+    if (cleaned.startsWith('549')) {
+        cleaned = '54' + cleaned.slice(3);
+    }
+    return cleaned;
+}
+
+function isAdmin(phone, msg) {
+    if (msg && msg.fromMe) {
+        return true;
+    }
     if (!config.ADMIN_PHONES || config.ADMIN_PHONES.length === 0) {
         return true;
     }
-    return config.ADMIN_PHONES.some(admin => phone.endsWith(admin) || admin.endsWith(phone));
+    const cleanSender = cleanPhone(phone);
+    return config.ADMIN_PHONES.some(admin => {
+        const cleanAdm = cleanPhone(admin);
+        if (!cleanAdm || !cleanSender) return false;
+        return cleanSender === cleanAdm || cleanSender.endsWith(cleanAdm) || cleanAdm.endsWith(cleanSender);
+    });
 }
 
 /**
@@ -75,6 +92,7 @@ async function handleMessage(msg, client) {
     const senderChatId = isGroup ? (msg.author || msg.from) : (msg.fromMe ? (msg.to || msg.from) : msg.from);
     const senderPhone = senderChatId.replace(/@.*/, '');
     const session = getSession(senderChatId);
+    const isUserAdmin = Boolean(msg.fromMe || isAdmin(senderPhone, msg));
 
     const normalizedBody = rawBody.toUpperCase();
 
@@ -92,7 +110,7 @@ async function handleMessage(msg, client) {
         }
 
         // Comandos de administrador en el grupo (ej: !anuncio, !pagado, !liberar)
-        if (rawBody.startsWith(config.PREFIX) && (msg.fromMe || isAdmin(senderPhone))) {
+        if (rawBody.startsWith(config.PREFIX) && isUserAdmin) {
             const args = rawBody.slice(config.PREFIX.length).trim().split(/\s+/);
             const command = args.shift().toLowerCase();
             
@@ -124,7 +142,7 @@ async function handleMessage(msg, client) {
 
             session.step = 'MENU';
             session.tempData = {};
-            await sendReply(client, senderChatId, buildMainMenu(senderPhone));
+            await sendReply(client, senderChatId, buildMainMenu(isUserAdmin));
             return;
         }
 
@@ -139,7 +157,7 @@ async function handleMessage(msg, client) {
     if (normalizedBody === 'SORTEO' || normalizedBody === '!SORTEO' || normalizedBody === 'MENU' || normalizedBody === '!MENU') {
         session.step = 'MENU';
         session.tempData = {};
-        await sendReply(client, senderChatId, buildMainMenu(senderPhone));
+        await sendReply(client, senderChatId, buildMainMenu(isUserAdmin));
         return;
     }
 
@@ -147,18 +165,18 @@ async function handleMessage(msg, client) {
     if (normalizedBody === '0' || normalizedBody === 'VOLVER') {
         session.step = 'MENU';
         session.tempData = {};
-        await sendReply(client, senderChatId, buildMainMenu(senderPhone));
+        await sendReply(client, senderChatId, buildMainMenu(isUserAdmin));
         return;
     }
 
     // Si está dentro de una sesión interactiva del menú
     if (session.step !== 'IDLE') {
-        const handled = await handleConversationFlow(client, senderChatId, rawBody, session, senderPhone);
+        const handled = await handleConversationFlow(client, senderChatId, rawBody, session, senderPhone, isUserAdmin);
         if (handled) return;
     }
 
     // Comandos directos de administrador en privado
-    if (rawBody.startsWith(config.PREFIX) && (msg.fromMe || isAdmin(senderPhone))) {
+    if (rawBody.startsWith(config.PREFIX) && isUserAdmin) {
         const args = rawBody.slice(config.PREFIX.length).trim().split(/\s+/);
         const command = args.shift().toLowerCase();
         await handleDirectCommand(client, senderChatId, command, args, senderPhone);
@@ -172,7 +190,7 @@ async function handleMessage(msg, client) {
 // MENÚS Y TEXTOS
 // -------------------------------------------------------------
 
-function buildMainMenu(phone) {
+function buildMainMenu(isAdminUser) {
     let text = `🎲 *${config.EVENTO_NOMBRE}* 🎲\n\n`;
     text += `Por favor responde con el *número* de la opción que deseas:\n\n`;
     text += `1️⃣ 🎟️ *Elegir / Reservar un número*\n`;
@@ -180,11 +198,11 @@ function buildMainMenu(phone) {
     text += `3️⃣ 🔍 *Consultar mis números y pagos*\n`;
     text += `4️⃣ 💳 *Datos para transferir (Alias/CBU)*\n`;
     
-    if (isAdmin(phone)) {
+    if (isAdminUser) {
         text += `5️⃣ 👑 *Menú de Administrador*\n`;
     }
 
-    text += `\n💡 *Responde con el número de la opción (1, 2, 3, 4 o 5).*`;
+    text += `\n💡 *Responde con el número de la opción (1, 2, 3, 4${isAdminUser ? ' o 5' : ''}).*`;
     return text;
 }
 
@@ -204,8 +222,21 @@ function buildAdminMenu() {
 // FLUJO CONVERSACIONAL PASO A PASO
 // -------------------------------------------------------------
 
-async function handleConversationFlow(client, chatId, text, session, senderPhone) {
+async function handleConversationFlow(client, chatId, text, session, senderPhone, isUserAdmin) {
     const input = text.trim();
+
+    // Cancelar o volver atrás en cualquier paso
+    if (input === '0' || input.toUpperCase() === 'VOLVER') {
+        if (session.step.startsWith('ADMIN_WAITING_')) {
+            session.step = 'ADMIN_MENU';
+            await sendReply(client, chatId, buildAdminMenu());
+            return true;
+        }
+        session.step = 'MENU';
+        session.tempData = {};
+        await sendReply(client, chatId, buildMainMenu(isUserAdmin));
+        return true;
+    }
 
     // Manejador del Menú Principal
     if (session.step === 'MENU') {
@@ -238,12 +269,13 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
             await cmdDatosPago(client, chatId);
             await sendReply(client, chatId, `🔙 _Escribe 0 para volver al menú principal_`);
             return true;
-        } else if (input === '5' && isAdmin(senderPhone)) {
+        } else if (input === '5' && isUserAdmin) {
             session.step = 'ADMIN_MENU';
             await sendReply(client, chatId, buildAdminMenu());
             return true;
         } else {
-            await sendReply(client, chatId, `⚠️ Opción no válida.\nPor favor responde con 1, 2, 3, 4 o 0 para volver al menú:`);
+            const validOptions = isUserAdmin ? '1, 2, 3, 4, 5 o 0' : '1, 2, 3, 4 o 0';
+            await sendReply(client, chatId, `⚠️ Opción no válida.\nPor favor responde con ${validOptions} para volver al menú:`);
             return true;
         }
     }
@@ -365,19 +397,22 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
             return true;
         } else if (input === '3') {
             await cmdPendientes(client, chatId);
-            await sendReply(client, chatId, `🔙 _Escribe 0 para volver al menú_`);
+            await sendReply(client, chatId, `👉 Responde con *1* (Confirmar pago), *2* (Liberar), *4* (Balance), *5* (Tablero) o *0* (Volver)`);
             return true;
         } else if (input === '4') {
             await cmdResumen(client, chatId);
-            await sendReply(client, chatId, `🔙 _Escribe 0 para volver al menú_`);
+            await sendReply(client, chatId, `👉 Responde con *1* (Confirmar pago), *2* (Liberar), *3* (Pendientes), *5* (Tablero) o *0* (Volver)`);
             return true;
         } else if (input === '5') {
             await cmdTablero(client, chatId);
-            await sendReply(client, chatId, `🔙 _Escribe 0 para volver al menú_`);
+            await sendReply(client, chatId, `👉 Responde con *1* (Confirmar pago), *2* (Liberar), *3* (Pendientes), *4* (Balance) o *0* (Volver)`);
             return true;
         } else if (input === '0') {
             session.step = 'MENU';
-            await sendReply(client, chatId, buildMainMenu(senderPhone));
+            await sendReply(client, chatId, buildMainMenu(isUserAdmin));
+            return true;
+        } else {
+            await sendReply(client, chatId, `⚠️ Opción no válida.\nPor favor responde con 1, 2, 3, 4, 5 o 0 para volver al menú principal:`);
             return true;
         }
     }
@@ -409,7 +444,6 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
             await sendReply(client, chatId, `♻️ Número *${res.numero}* liberado y disponible nuevamente.`);
             await sendReply(client, chatId, buildAdminMenu());
         }
-        return true;
     }
 
     return false;
