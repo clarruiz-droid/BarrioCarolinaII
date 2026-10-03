@@ -217,21 +217,13 @@ async function handleMessage(msg, client) {
         return;
     }
 
-    // Si el usuario escribe 0 o VOLVER
-    if (normalizedBody === '0' || normalizedBody === 'VOLVER') {
-        session.step = 'MENU';
-        session.tempData = {};
-        await sendReply(client, senderChatId, buildMainMenu(isUserAdmin));
-        return;
-    }
-
-    // Si está dentro de una sesión interactiva del menú
+    // Si está dentro de una sesión interactiva activa del menú
     if (session.step !== 'IDLE') {
         const handled = await handleConversationFlow(client, senderChatId, rawBody, session, senderPhone, isUserAdmin);
         if (handled) return;
     }
 
-    // Comandos directos de administrador en privado
+    // Comandos directos de administrador en privado (con prefijo !)
     if (rawBody.startsWith(config.PREFIX) && isUserAdmin) {
         const args = rawBody.slice(config.PREFIX.length).trim().split(/\s+/);
         const command = args.shift().toLowerCase();
@@ -239,10 +231,7 @@ async function handleMessage(msg, client) {
         return;
     }
 
-    // Cualquier otro mensaje inicial en privado abre el menú con toda la información
-    session.step = 'MENU';
-    session.tempData = {};
-    await sendReply(client, senderChatId, buildMainMenu(isUserAdmin));
+    // Si no está en una sesión activa y no escribió la palabra clave, ignorar en silencio
     return;
 }
 
