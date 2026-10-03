@@ -323,6 +323,20 @@ function getPendingPayments() {
 }
 
 /**
+ * Obtiene todos los números en estado PAGADO
+ */
+function getPaidNumbers() {
+    const db = readRawData();
+    const pagados = [];
+    for (const [num, data] of Object.entries(db.numeros)) {
+        if (data.estado === 'PAGADO') {
+            pagados.push({ numero: num, ...data });
+        }
+    }
+    return pagados.sort((a, b) => parseInt(a.numero, 10) - parseInt(b.numero, 10));
+}
+
+/**
  * Obtiene resumen y balance general
  */
 function getSummary() {
@@ -364,5 +378,6 @@ module.exports = {
     getAvailableNumbers,
     getUserNumbers,
     getPendingPayments,
+    getPaidNumbers,
     getSummary
 };

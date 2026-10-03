@@ -127,7 +127,7 @@ async function handleMessage(msg, client) {
             return;
         }
 
-        // Comandos de administrador en el grupo (ej: !anuncio, !pagado, !liberar)
+        // Comandos de administrador en el grupo (ej: !anuncio, !pagado, !pagados, !liberar)
         if (rawBody.startsWith(config.PREFIX) && isUserAdmin) {
             const args = rawBody.slice(config.PREFIX.length).trim().split(/\s+/);
             const command = args.shift().toLowerCase();
@@ -138,6 +138,10 @@ async function handleMessage(msg, client) {
             }
             if (command === 'pagado') {
                 await cmdPagado(client, currentGroupId, args, senderPhone);
+                return;
+            }
+            if (command === 'pagados' || command === 'listapagados' || command === 'comprados') {
+                await cmdPagados(client, currentGroupId);
                 return;
             }
             if (command === 'liberar') {
@@ -231,8 +235,9 @@ function buildAdminMenu() {
     text += `1️⃣ ✅ *Confirmar pago de un número*\n`;
     text += `2️⃣ ♻️ *Liberar un número*\n`;
     text += `3️⃣ ⏳ *Ver reservas pendientes de pago*\n`;
-    text += `4️⃣ 📊 *Ver balance y recaudación*\n`;
-    text += `5️⃣ 📋 *Ver tablero completo*\n\n`;
+    text += `4️⃣ 🟢 *Ver listado de números pagados*\n`;
+    text += `5️⃣ 📊 *Ver balance y recaudación*\n`;
+    text += `6️⃣ 📋 *Ver tablero completo*\n\n`;
     text += `0️⃣ 🔙 *Volver al menú principal*`;
     return text;
 }
@@ -504,15 +509,19 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
             return true;
         } else if (input === '3') {
             await cmdPendientes(client, chatId);
-            await sendReply(client, chatId, `👉 Responde con *1* (Confirmar pago), *2* (Liberar), *4* (Balance), *5* (Tablero) o *0* (Volver)`);
+            await sendReply(client, chatId, `👉 Responde con *1* (Confirmar pago), *2* (Liberar), *4* (Pagados), *5* (Balance), *6* (Tablero) o *0* (Volver)`);
             return true;
         } else if (input === '4') {
-            await cmdResumen(client, chatId);
-            await sendReply(client, chatId, `👉 Responde con *1* (Confirmar pago), *2* (Liberar), *3* (Pendientes), *5* (Tablero) o *0* (Volver)`);
+            await cmdPagados(client, chatId);
+            await sendReply(client, chatId, `👉 Responde con *1* (Confirmar pago), *2* (Liberar), *3* (Pendientes), *5* (Balance), *6* (Tablero) o *0* (Volver)`);
             return true;
         } else if (input === '5') {
+            await cmdResumen(client, chatId);
+            await sendReply(client, chatId, `👉 Responde con *1* (Confirmar pago), *2* (Liberar), *3* (Pendientes), *4* (Pagados), *6* (Tablero) o *0* (Volver)`);
+            return true;
+        } else if (input === '6') {
             await cmdTablero(client, chatId);
-            await sendReply(client, chatId, `👉 Responde con *1* (Confirmar pago), *2* (Liberar), *3* (Pendientes), *4* (Balance) o *0* (Volver)`);
+            await sendReply(client, chatId, `👉 Responde con *1* (Confirmar pago), *2* (Liberar), *3* (Pendientes), *4* (Pagados), *5* (Balance) o *0* (Volver)`);
             return true;
         } else if (input === '0') {
             session.step = 'MENU';
@@ -520,7 +529,7 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
             await sendReply(client, chatId, buildMainMenu(isUserAdmin));
             return true;
         } else {
-            await sendReply(client, chatId, `⚠️ Opción no válida.\nPor favor responde con 1, 2, 3, 4, 5 o 0 para volver al menú principal:`);
+            await sendReply(client, chatId, `⚠️ Opción no válida.\nPor favor responde con 1, 2, 3, 4, 5, 6 o 0 para volver al menú principal:`);
             return true;
         }
     }
@@ -744,6 +753,12 @@ async function handleDirectCommand(client, chatId, command, args, senderPhone) {
             await cmdPendientes(client, chatId);
             break;
 
+        case 'pagados':
+        case 'listapagados':
+        case 'comprados':
+            await cmdPagados(client, chatId);
+            break;
+
         case 'resumen':
             await cmdResumen(client, chatId);
             break;
@@ -769,6 +784,20 @@ async function cmdLibres(client, chatId) {
 
     const fullListText = `📋 *Números Disponibles (${libres.length}/${total}):*\n\n` + libres.join(' - ');
     await sendReply(client, chatId, fullListText);
+}
+
+async function cmdPagados(client, chatId) {
+    const pagados = db.getPaidNumbers();
+    const total = config.NUMERO_MAX - config.NUMERO_MIN + 1;
+
+    if (pagados.length === 0) {
+        await sendReply(client, chatId, '🟢 Aún no hay números registrados como pagados.');
+        return;
+    }
+
+    const shortList = pagados.map(p => p.numero).join(' - ');
+    const text = `🟢 *Números Pagados (${pagados.length}/${total}):*\n\n` + shortList;
+    await sendReply(client, chatId, text);
 }
 
 async function cmdMisNumeros(client, chatId, senderPhone) {
