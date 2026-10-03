@@ -66,9 +66,6 @@ client.on('ready', () => {
 
 // Evento: Mensajes recibidos
 client.on('message_create', async (msg) => {
-    // REGLA CRÍTICA: Ignorar mensajes enviados por el propio bot para evitar bucles infinitos
-    if (msg.fromMe) return;
-
     if (msg.body) {
         try {
             await commands.handleMessage(msg, client);

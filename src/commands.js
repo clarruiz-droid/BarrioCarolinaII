@@ -13,7 +13,6 @@ function getSession(userId) {
             lastActivity: Date.now()
         };
     }
-    // Si pasaron más de 15 minutos de inactividad, reiniciar a IDLE
     if (Date.now() - userSessions[userId].lastActivity > 15 * 60 * 1000) {
         userSessions[userId].step = 'IDLE';
         userSessions[userId].tempData = {};
@@ -37,6 +36,18 @@ function isAdmin(phone) {
     return config.ADMIN_PHONES.some(admin => phone.endsWith(admin) || admin.endsWith(phone));
 }
 
+/**
+ * Detecta si un mensaje fue generado automáticamente por el bot para no responderse a sí mismo
+ */
+function isBotGeneratedMessage(text) {
+    if (!text) return true;
+    const botMarkers = ['🎲', '👋', '✅', '❌', '🎉', '📋', '•', '🔢', '👤', '🏠', '💳', '⏳', '📊', '🔒', '📢', '♻️', 'ℹ️', '⚠️', '👉', '🔙', '👑'];
+    return botMarkers.some(marker => text.startsWith(marker));
+}
+
+/**
+ * Enviar mensaje de forma directa y segura
+ */
 async function sendReply(client, chatId, text) {
     try {
         await client.sendMessage(chatId, text);
@@ -48,15 +59,20 @@ async function sendReply(client, chatId, text) {
 }
 
 async function handleMessage(msg, client) {
-    if (msg.fromMe) return;
-
     const rawBody = (msg.body || '').trim();
     if (!rawBody) return;
+
+    // Si el mensaje fue enviado por la propia cuenta del bot:
+    // Solo lo procesamos si NO es una respuesta generada por el bot (para evitar bucles)
+    if (msg.fromMe && isBotGeneratedMessage(rawBody)) {
+        return;
+    }
 
     const isGroup = msg.from.endsWith('@g.us') || (msg.fromMe && (msg.to || '').endsWith('@g.us'));
     const currentGroupId = isGroup ? (msg.from.endsWith('@g.us') ? msg.from : msg.to) : null;
     
-    const senderChatId = isGroup ? (msg.author || msg.from) : msg.from;
+    // Identificar al remitente (si es fromMe, es el admin mismo en su chat propio)
+    const senderChatId = isGroup ? (msg.author || msg.from) : (msg.fromMe ? (msg.to || msg.from) : msg.from);
     const senderPhone = senderChatId.replace(/@.*/, '');
     const session = getSession(senderChatId);
 
@@ -75,12 +91,26 @@ async function handleMessage(msg, client) {
             return;
         }
 
-        if (rawBody.startsWith('!anuncio') && isAdmin(senderPhone)) {
-            const args = rawBody.slice('!anuncio'.length).trim().split(/\s+/);
-            await cmdAnuncio(client, currentGroupId, args);
-            return;
+        // Comandos de administrador en el grupo (ej: !anuncio, !pagado, !liberar)
+        if (rawBody.startsWith(config.PREFIX) && (msg.fromMe || isAdmin(senderPhone))) {
+            const args = rawBody.slice(config.PREFIX.length).trim().split(/\s+/);
+            const command = args.shift().toLowerCase();
+            
+            if (command === 'anuncio') {
+                await cmdAnuncio(client, currentGroupId, args);
+                return;
+            }
+            if (command === 'pagado') {
+                await cmdPagado(client, currentGroupId, args, senderPhone);
+                return;
+            }
+            if (command === 'liberar') {
+                await cmdLiberar(client, currentGroupId, args);
+                return;
+            }
         }
 
+        // Si alguien escribe SORTEO en el grupo
         if (normalizedBody === 'SORTEO') {
             const botNumber = client.info?.wid?.user;
             const waLink = botNumber ? `\n\n👉 *Haz clic aquí:* https://wa.me/${botNumber}?text=SORTEO` : '';
@@ -102,7 +132,7 @@ async function handleMessage(msg, client) {
     }
 
     // =============================================================
-    // 2. SI EL MENSAJE ES EN CHAT PRIVADO
+    // 2. SI EL MENSAJE ES EN CHAT PRIVADO (O CHAT CON UNO MISMO)
     // =============================================================
 
     // Apertura o reinicio del menú con SORTEO o MENU
@@ -113,7 +143,7 @@ async function handleMessage(msg, client) {
         return;
     }
 
-    // Si el usuario presiona "0" o "VOLVER" en cualquier momento, regresa al menú principal
+    // Si el usuario escribe 0 o VOLVER
     if (normalizedBody === '0' || normalizedBody === 'VOLVER') {
         session.step = 'MENU';
         session.tempData = {};
@@ -121,21 +151,20 @@ async function handleMessage(msg, client) {
         return;
     }
 
-    // Si el usuario está dentro de una sesión interactiva del menú
+    // Si está dentro de una sesión interactiva del menú
     if (session.step !== 'IDLE') {
         const handled = await handleConversationFlow(client, senderChatId, rawBody, session, senderPhone);
         if (handled) return;
     }
 
     // Comandos directos de administrador en privado
-    if (rawBody.startsWith(config.PREFIX) && isAdmin(senderPhone)) {
+    if (rawBody.startsWith(config.PREFIX) && (msg.fromMe || isAdmin(senderPhone))) {
         const args = rawBody.slice(config.PREFIX.length).trim().split(/\s+/);
         const command = args.shift().toLowerCase();
         await handleDirectCommand(client, senderChatId, command, args, senderPhone);
         return;
     }
 
-    // Silencio ante cualquier otro mensaje fuera del flujo
     return;
 }
 
@@ -155,7 +184,7 @@ function buildMainMenu(phone) {
         text += `5️⃣ 👑 *Menú de Administrador*\n`;
     }
 
-    text += `\n💡 *Responde con el número de la opción (1, 2, 3, 4).*`;
+    text += `\n💡 *Responde con el número de la opción (1, 2, 3, 4 o 5).*`;
     return text;
 }
 
@@ -244,7 +273,6 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
             return true;
         }
 
-        // Guardar número elegido y avanzar al Paso 2
         session.tempData.numero = num;
         session.step = 'WAITING_NAME';
         await sendReply(
@@ -315,7 +343,6 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
 
         await sendReply(client, chatId, confirmacion);
 
-        // Anuncio en el grupo oficial si está configurado
         if (config.GRUPO_ID) {
             await sendReply(
                 client,
@@ -413,40 +440,27 @@ async function handleDirectCommand(client, chatId, command, args, senderPhone) {
             break;
 
         case 'pagado':
-            if (isAdmin(senderPhone) && args.length > 0) {
-                const res = db.confirmPayment(args[0], senderPhone);
-                if (res.success) {
-                    await sendReply(client, chatId, `✅ Pago confirmado para el número *${res.numero}*.`);
-                    if (config.GRUPO_ID) {
-                        await sendReply(client, config.GRUPO_ID, `🎉 *¡Pago confirmado!* Número *${res.numero}* de *${res.item.vecino}* (*${res.item.casa}*) 🟢 PAGADO.`);
-                    }
-                } else {
-                    await sendReply(client, chatId, `❌ ${res.message}`);
-                }
+            if (args.length > 0) {
+                await cmdPagado(client, chatId, args, senderPhone);
             }
             break;
 
         case 'liberar':
-            if (isAdmin(senderPhone) && args.length > 0) {
-                const res = db.releaseNumber(args[0]);
-                if (res.success) {
-                    await sendReply(client, chatId, `♻️ Número *${res.numero}* liberado.`);
-                } else {
-                    await sendReply(client, chatId, `❌ ${res.message}`);
-                }
+            if (args.length > 0) {
+                await cmdLiberar(client, chatId, args);
             }
             break;
 
         case 'pendientes':
-            if (isAdmin(senderPhone)) await cmdPendientes(client, chatId);
+            await cmdPendientes(client, chatId);
             break;
 
         case 'resumen':
-            if (isAdmin(senderPhone)) await cmdResumen(client, chatId);
+            await cmdResumen(client, chatId);
             break;
 
         case 'tablero':
-            if (isAdmin(senderPhone)) await cmdTablero(client, chatId);
+            await cmdTablero(client, chatId);
             break;
     }
 }
@@ -528,6 +542,30 @@ async function cmdTablero(client, chatId) {
         else if (data.estado === 'PAGADO') text += `[${num}] 🟢 ${data.vecino} (${data.casa}) - Pagado\n`;
     }
     await sendReply(client, chatId, text);
+}
+
+async function cmdPagado(client, targetChat, args, adminPhone) {
+    const res = db.confirmPayment(args[0], adminPhone);
+    if (res.success) {
+        await sendReply(client, targetChat, `✅ *¡Pago Confirmado!* Número *${res.numero}* (${res.item.vecino} - ${res.item.casa}) 🟢 PAGADO.`);
+        if (config.GRUPO_ID && targetChat !== config.GRUPO_ID) {
+            await sendReply(client, config.GRUPO_ID, `🎉 *¡Pago confirmado!* Número *${res.numero}* de *${res.item.vecino}* (*${res.item.casa}*) 🟢 PAGADO.`);
+        }
+        if (res.item.telefono) {
+            await sendReply(client, res.item.telefono + '@c.us', `✅ ¡Hola *${res.item.vecino}*! Tu pago por el número *${res.numero}* ha sido confirmado.`);
+        }
+    } else {
+        await sendReply(client, targetChat, `❌ ${res.message}`);
+    }
+}
+
+async function cmdLiberar(client, targetChat, args) {
+    const res = db.releaseNumber(args[0]);
+    if (res.success) {
+        await sendReply(client, targetChat, `♻️ Número *${res.numero}* liberado y disponible nuevamente.`);
+    } else {
+        await sendReply(client, targetChat, `❌ ${res.message}`);
+    }
 }
 
 async function cmdAnuncio(client, groupId, args) {
