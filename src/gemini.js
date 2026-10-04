@@ -37,15 +37,17 @@ async function analyzeReceipt(base64Data, mimeType = 'image/jpeg') {
 Devuelve estrictamente un objeto JSON con la siguiente estructura:
 {
   "es_comprobante": true/false (true si es un comprobante de transferencia/pago, false si es una foto o documento cualquiera sin relación),
-  "monto": number o null (el monto total transferido en pesos argentinos, ej: 1000, 2000, 5000; número puro sin signos $ ni puntos de miles),
-  "destinatario_nombre": string o null (nombre del titular o cuenta receptora que recibió el dinero),
-  "destinatario_identificador": string o null (CBU, CVU, Alias o CUIT/CUIL de la cuenta de destino si aparece),
-  "emisor_nombre": string o null (nombre de quien envió el dinero si figura),
+  "monto": number o null (el monto total transferido en pesos argentinos, ej: 1000, 2000, 3000, 5000; número puro sin signos $ ni puntos de miles),
+  "destinatario_cbu_cvu": string o null (CBU, CVU o número de cuenta de destino que figura en el comprobante, sólo números/dígitos si es posible),
+  "destinatario_alias": string o null (Alias de la cuenta de destino si figura, ej: "barrio.carolina.pagos"),
+  "destinatario_nombre": string o null (nombre o titular de la cuenta receptora si figura),
+  "destinatario_identificador": string o null (CBU, CVU, Alias o CUIT/CUIL de la cuenta de destino),
+  "emisor_nombre": string o null (nombre y apellido de quien realizó o envió la transferencia),
   "numero_operacion": string o null (código de transferencia, número de operación, ID de transacción, código Coelsa o número de comprobante),
   "fecha_hora": string o null (fecha y hora indicada en el comprobante, ej: "04/10/2026 14:00"),
   "banco_origen": string o null (nombre de la app, banco o billetera desde donde se hizo, ej: "Mercado Pago", "Cuenta DNI", "Banco Nación"),
   "estado_operacion": string o null (ej: "EXITOSA", "REALIZADA", "PENDIENTE", "RECHAZADA"),
-  "resumen_lectura": string (breve resumen de 1 línea de lo detectado, ej: "Transferencia de $2000 a Comisión Vecinal por Mercado Pago")
+  "resumen_lectura": string (breve resumen de 1 línea de lo detectado, ej: "Transferencia de $3000 por Mercado Pago")
 }`;
 
     const imagePart = {

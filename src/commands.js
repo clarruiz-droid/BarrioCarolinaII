@@ -436,6 +436,91 @@ async function downloadMediaCustom(client, msg) {
 }
 
 /**
+ * Compara dos nombres con tolerancia y flexibilidad (ignora acentos, mayúsculas, orden y segundo nombre)
+ */
+function isFlexibleNameMatch(dbName, inputName) {
+    if (!dbName || !inputName) return false;
+
+    const normalize = (str) => {
+        return String(str)
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "") // quitar tildes
+            .toLowerCase()
+            .replace(/[^a-z0-9\s]/g, " ")     // solo caracteres alfanuméricos
+            .replace(/\s+/g, " ")
+            .trim();
+    };
+
+    const n1 = normalize(dbName);
+    const n2 = normalize(inputName);
+
+    if (!n1 || !n2) return false;
+    if (n1 === n2) return true;
+    if (n1.includes(n2) || n2.includes(n1)) return true;
+
+    // Palabras ignoradas comunes en nombres/direcciones
+    const ignoreTokens = new Set(['manzana', 'casa', 'lote', 'barrio', 'mza', 'm', 'c', 'dpto', 'de', 'del', 'la', 'el', 'los', 'las', 'y']);
+
+    const tokens1 = n1.split(' ').filter(t => t.length >= 2 && !ignoreTokens.has(t));
+    const tokens2 = n2.split(' ').filter(t => t.length >= 2 && !ignoreTokens.has(t));
+
+    if (tokens1.length === 0 || tokens2.length === 0) return false;
+
+    const commonTokens = tokens1.filter(t => tokens2.includes(t));
+
+    // Si comparten al menos 2 palabras (ej: "claudio" y "ruiz")
+    if (commonTokens.length >= 2) return true;
+
+    // Si una lista de tokens está completamente contenida en la otra (ej: "claudio ruiz" en "claudio ariel ruiz")
+    if (tokens1.every(t => tokens2.includes(t)) || tokens2.every(t => tokens1.includes(t))) return true;
+
+    // Si comparten la palabra principal de al menos 4 letras y alguno tiene solo 1 token
+    if (commonTokens.length >= 1 && (tokens1.length === 1 || tokens2.length === 1) && commonTokens[0].length >= 4) {
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * Busca reservas pendientes con máxima flexibilidad: por teléfono, por nombre en comprobante o por pushname de WhatsApp
+ */
+function findPendingReservationsForReceipt(senderPhone, senderContactName, emisorReceiptName) {
+    const allPending = db.getPendingPayments();
+    if (!allPending || allPending.length === 0) return [];
+
+    // 1. Prioridad: Por coincidencia telefónica
+    const cleanSenderPhone = String(senderPhone || '').replace(/\D/g, '');
+    if (cleanSenderPhone && cleanSenderPhone.length >= 6) {
+        const byPhone = allPending.filter(item => {
+            const cleanItemPhone = String(item.telefono || '').replace(/\D/g, '');
+            if (!cleanItemPhone) return false;
+            return cleanItemPhone === cleanSenderPhone ||
+                   cleanItemPhone.endsWith(cleanSenderPhone) ||
+                   cleanSenderPhone.endsWith(cleanItemPhone) ||
+                   (cleanItemPhone.length >= 8 && cleanSenderPhone.length >= 8 && (
+                       cleanItemPhone.slice(-8) === cleanSenderPhone.slice(-8)
+                   ));
+        });
+        if (byPhone.length > 0) return byPhone;
+    }
+
+    // 2. Prioridad: Por nombre del emisor en el comprobante (ej: "Claudio Ruiz" en comprobante -> "Claudio Ruiz" en DB)
+    if (emisorReceiptName && emisorReceiptName.trim().length >= 3) {
+        const byEmisor = allPending.filter(item => isFlexibleNameMatch(item.vecino, emisorReceiptName));
+        if (byEmisor.length > 0) return byEmisor;
+    }
+
+    // 3. Prioridad: Por nombre de perfil de WhatsApp del remitente (pushname o notifyName)
+    if (senderContactName && senderContactName.trim().length >= 3) {
+        const byContact = allPending.filter(item => isFlexibleNameMatch(item.vecino, senderContactName));
+        if (byContact.length > 0) return byContact;
+    }
+
+    return [];
+}
+
+/**
  * Procesa y valida automáticamente comprobantes de pago enviados por imágenes o PDF
  */
 async function handleReceiptMedia(msg, client, chatId, senderPhone, isUserAdmin) {
@@ -529,16 +614,36 @@ async function handleReceiptMedia(msg, client, chatId, senderPhone, isUserAdmin)
             return true;
         }
 
-        // 2. Buscar reservas pendientes del comprador
-        const userNums = db.getUserNumbers(senderPhone);
-        const pendingNums = userNums.filter(n => n.estado === 'RESERVADO');
+        // 2. Verificación de CBU / CVU de destino (validando cuenta/alias, no el nombre del destinatario)
+        const configCbuDigits = String(config.DATOS_PAGO?.cbu || '').replace(/\D/g, '');
+        const configAlias = String(config.DATOS_PAGO?.alias || '').trim().toLowerCase();
+        const receiptCbuDigits = String(data.destinatario_cbu_cvu || data.destinatario_identificador || '').replace(/\D/g, '');
+        const receiptAlias = String(data.destinatario_alias || '').trim().toLowerCase();
+
+        let cbuInvalido = false;
+        if (receiptCbuDigits.length === 22 && configCbuDigits.length === 22 && receiptCbuDigits !== configCbuDigits) {
+            console.log(`[Gemini] CBU destino no coincide: detectado ${receiptCbuDigits} vs ${configCbuDigits}`);
+            cbuInvalido = true;
+        }
+
+        // Obtener nombre del contacto de WhatsApp
+        let contactPushname = msg._data?.notifyName || '';
+        try {
+            const contact = await msg.getContact();
+            if (contact) {
+                contactPushname = contact.pushname || contact.name || contactPushname;
+            }
+        } catch (e) {}
+
+        // 3. Buscar reservas pendientes del comprador con máxima flexibilidad
+        const pendingNums = findPendingReservationsForReceipt(senderPhone, contactPushname, data.emisor_nombre);
 
         const montoDetectado = Number(data.monto) || 0;
         const deudaTotal = pendingNums.length * config.PRECIO_NUMERO;
 
         // Validar si el monto cubre la deuda y la auto-aprobación está activa
-        if (pendingNums.length > 0 && montoDetectado >= deudaTotal && deudaTotal > 0 && config.AUTO_APROBAR_COMPROBANTES) {
-            const vecNombre = pendingNums[0].vecino || 'Vecino';
+        if (pendingNums.length > 0 && montoDetectado >= deudaTotal && deudaTotal > 0 && config.AUTO_APROBAR_COMPROBANTES && !cbuInvalido) {
+            const vecNombre = pendingNums[0].vecino || data.emisor_nombre || contactPushname || 'Vecino';
             const vecCasa = pendingNums[0].casa || '-';
             const numerosConfirmados = [];
 
@@ -592,8 +697,10 @@ async function handleReceiptMedia(msg, client, chatId, senderPhone, isUserAdmin)
 
         // Si no se pudo auto-aprobar (monto parcial, sin reservas o auto-aprobación desactivada)
         let motivo = '';
-        if (pendingNums.length === 0) {
-            motivo = 'No se encontraron números reservados a nombre de este teléfono.';
+        if (cbuInvalido) {
+            motivo = 'El CBU de destino detectado en el comprobante no coincide con la cuenta oficial.';
+        } else if (pendingNums.length === 0) {
+            motivo = 'No se encontraron reservas pendientes asociadas a este teléfono ni al nombre del titular.';
         } else if (montoDetectado < deudaTotal) {
             motivo = `El monto ($${montoDetectado.toLocaleString('es-AR')}) no cubre el total de tus reservas ($${deudaTotal.toLocaleString('es-AR')}).`;
         } else {
