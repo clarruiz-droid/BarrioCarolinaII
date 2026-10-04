@@ -15,16 +15,120 @@ if (fs.existsSync(utilsFile)) {
     }
 }
 
-// 2. Parche para Message.js (evitar excepciones 'r' al descargar media)
+// 2. Parche completo para Message.js downloadMedia
 const messageFile = path.join(__dirname, '..', 'node_modules', 'whatsapp-web.js', 'src', 'structures', 'Message.js');
 if (fs.existsSync(messageFile)) {
     let content = fs.readFileSync(messageFile, 'utf-8');
-    const targetCode = `if (msg.mediaData.mediaStage != 'RESOLVED') {\n                // try to resolve media\n                await msg.downloadMedia({\n                    downloadEvenIfExpensive: true,\n                    rmrReason: 1,\n                });\n            }`;
-    const safeCode = `if (msg.mediaData.mediaStage != 'RESOLVED') {\n                try {\n                    await msg.downloadMedia({ downloadEvenIfExpensive: true, rmrReason: 1 });\n                } catch (e) {}\n            }`;
 
-    if (content.includes("if (msg.mediaData.mediaStage != 'RESOLVED') {")) {
-        content = content.replace(/if\s*\(\s*msg\.mediaData\.mediaStage\s*!=\s*'RESOLVED'\s*\)\s*\{[\s\S]*?await\s+msg\.downloadMedia\([\s\S]*?\);\s*\}/g, safeCode);
+    const patchedDownloadMedia = `    async downloadMedia() {
+        if (!this.hasMedia) {
+            return undefined;
+        }
+
+        const result = await this.client.pupPage.evaluate(async (msgId) => {
+            const msg =
+                window.require('WAWebCollections').Msg.get(msgId) ||
+                (
+                    await window
+                        .require('WAWebCollections')
+                        .Msg.getMessagesById([msgId])
+                )?.messages?.[0];
+
+            if (!msg || !msg.mediaData || msg.mediaData.mediaStage === 'REUPLOADING') {
+                return null;
+            }
+
+            if (msg.mediaData.mediaStage !== 'RESOLVED') {
+                try {
+                    await msg.downloadMedia({ downloadEvenIfExpensive: true, rmrReason: 1 });
+                } catch (e) {}
+            }
+
+            let waitCount = 0;
+            while ((msg.mediaData.mediaStage === 'FETCHING' || msg.mediaData.mediaStage === 'INIT') && waitCount < 20) {
+                await new Promise(r => setTimeout(r, 300));
+                waitCount++;
+            }
+
+            try {
+                const mockQpl = {
+                    addAnnotations: function () { return this; },
+                    addPoint: function () { return this; },
+                };
+                const decryptedMedia = await window
+                    .require('WAWebDownloadManager')
+                    .downloadManager.downloadAndMaybeDecrypt({
+                        directPath: msg.directPath,
+                        encFilehash: msg.encFilehash,
+                        filehash: msg.filehash,
+                        mediaKey: msg.mediaKey,
+                        mediaKeyTimestamp: msg.mediaKeyTimestamp,
+                        type: msg.type,
+                        signal: new AbortController().signal,
+                        downloadQpl: mockQpl,
+                    });
+
+                const data = await window.WWebJS.arrayBufferToBase64Async(decryptedMedia);
+                return {
+                    data,
+                    mimetype: msg.mimetype,
+                    filename: msg.filename,
+                    filesize: msg.size,
+                };
+            } catch (e) {
+                // Fallback 1: Si existe mediaBlob OpaqueData
+                try {
+                    const blob = msg.mediaData.mediaBlob || msg.mediaData._blob;
+                    if (blob) {
+                        const buffer = typeof blob.arrayBuffer === 'function' ? await blob.arrayBuffer() : null;
+                        if (buffer) {
+                            const data = await window.WWebJS.arrayBufferToBase64Async(buffer);
+                            return {
+                                data,
+                                mimetype: msg.mimetype || 'image/jpeg',
+                                filename: msg.filename || 'comprobante.jpg',
+                                filesize: msg.size || 0,
+                            };
+                        }
+                    }
+                } catch (eBlob) {}
+
+                // Fallback 2: Thumbnail / Preview base64
+                try {
+                    if (msg.mediaData && msg.mediaData.preview) {
+                        let b64 = msg.mediaData.preview._b64 || msg.mediaData.preview;
+                        if (typeof b64 === 'string') {
+                            b64 = b64.replace(/^data:image\\/[a-z]+;base64,/, '');
+                            return {
+                                data: b64,
+                                mimetype: msg.mimetype || 'image/jpeg',
+                                filename: msg.filename || 'comprobante.jpg',
+                                filesize: msg.size || 0,
+                            };
+                        }
+                    }
+                } catch (ePrev) {}
+
+                return undefined;
+            }
+        }, this.id._serialized);
+
+        if (!result) return undefined;
+        return new MessageMedia(
+            result.mimetype,
+            result.data,
+            result.filename,
+            result.filesize,
+        );
+    }`;
+
+    // Reemplaza todo el bloque async downloadMedia() {...} en Message.js
+    const downloadMediaRegex = /async\s+downloadMedia\(\)\s*\{[\s\S]*?if\s*\(!result\)\s*return\s*undefined;[\s\S]*?return\s+new\s+MessageMedia\([\s\S]*?\);\s*\}/;
+    if (downloadMediaRegex.test(content)) {
+        content = content.replace(downloadMediaRegex, patchedDownloadMedia);
         fs.writeFileSync(messageFile, content, 'utf-8');
-        console.log('[Patch] ✅ Archivo whatsapp-web.js Message.js parcheado con éxito.');
+        console.log('[Patch] ✅ Archivo whatsapp-web.js Message.js parcheado con éxito (downloadMedia mejorado).');
+    } else {
+        console.log('[Patch] ℹ️ Message.js ya cuenta con el parche.');
     }
 }
