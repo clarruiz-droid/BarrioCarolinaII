@@ -25,11 +25,8 @@ async function analyzeReceipt(base64Data, mimeType = 'image/jpeg') {
 
     const candidateModels = [
         'gemini-3.8-flash',
-        'gemini-3.8-pro',
-        'gemini-3-flash',
-        'gemini-3-pro',
-        'gemini-2.5-flash',
-        'gemini-2.0-flash'
+        'gemini-3.8-flash-lite',
+        'gemini-3.8-flash-preview'
     ];
 
     const prompt = `Analiza este comprobante de transferencia o pago bancario/billetera virtual (ej: Mercado Pago, Cuenta DNI, BNA+, Ualá, Banco Galicia, Santander, BBVA, Macro, Brubank, Naranja X, etc.) y extrae los datos con la máxima fidelidad posible.
@@ -74,16 +71,27 @@ Devuelve estrictamente un objeto JSON con la siguiente estructura:
             let result = null;
             let success = false;
             let attempt = 0;
+            const maxAttempts = 5;
 
-            while (attempt < 3 && !success) {
+            while (attempt < maxAttempts && !success) {
                 try {
                     result = await model.generateContent([prompt, imagePart]);
                     success = true;
                 } catch (apiErr) {
-                    if (apiErr.message && (apiErr.message.includes('503') || apiErr.message.includes('high demand'))) {
+                    const errStr = (apiErr.message || String(apiErr)).toLowerCase();
+                    const isTransient = errStr.includes('503') || 
+                                      errStr.includes('high demand') || 
+                                      errStr.includes('overloaded') || 
+                                      errStr.includes('429') || 
+                                      errStr.includes('resource_exhausted') || 
+                                      errStr.includes('fetch failed') ||
+                                      errStr.includes('econnreset');
+
+                    if (isTransient && attempt < maxAttempts - 1) {
                         attempt++;
-                        console.log(`[Gemini] Reintento ${attempt}/3 por alta demanda en ${modelName}...`);
-                        await new Promise(r => setTimeout(r, 1500));
+                        const delayMs = 1500 * attempt + Math.floor(Math.random() * 800);
+                        console.log(`[Gemini] Reintento ${attempt}/${maxAttempts} en ${delayMs}ms por alta demanda en ${modelName}...`);
+                        await new Promise(r => setTimeout(r, delayMs));
                     } else {
                         throw apiErr;
                     }
