@@ -185,26 +185,40 @@ async function downloadMediaCustom(client, msg) {
         if (!client || !client.pupPage) return null;
         const msgId = msg.id._serialized;
 
-        console.log('[Media] Intentando extracción directa desde Puppeteer DOM...');
+        console.log(`[Media] Msg info: type=${msg.type}, hasMedia=${msg.hasMedia}, mimetype=${msg.mimetype}`);
         const debugInfo = await client.pupPage.evaluate((msgId) => {
             try {
                 const coll = window.require('WAWebCollections').Msg;
                 const models = coll?.models || coll?._models || [];
-                let m = coll?.get(msgId) || models.find(i => i.id?._serialized === msgId || (i.id?.id && msgId.includes(i.id.id)));
-                if (!m) {
-                    const mediaMsgs = models.filter(i => i.isMedia || i.mediaData || i.type === 'image');
-                    m = mediaMsgs[mediaMsgs.length - 1];
+                
+                // Filtrar solo mensajes que realmente sean de tipo imagen o documento
+                const realMediaMsgs = models.filter(i => 
+                    i.type === 'image' || 
+                    i.type === 'document' || 
+                    (i.mimetype && (i.mimetype.startsWith('image/') || i.mimetype === 'application/pdf'))
+                );
+
+                let m = coll?.get(msgId);
+                if (!m || m.type === 'chat') {
+                    const rawId = msgId.split('_')[2] || msgId;
+                    m = models.find(i => i.id?._serialized === msgId || i.id?.id === rawId);
                 }
-                if (!m) return { found: false, totalModels: models.length };
+                if (!m || m.type === 'chat') {
+                    m = realMediaMsgs[realMediaMsgs.length - 1];
+                }
+
+                if (!m) return { found: false, totalModels: models.length, totalMediaFound: realMediaMsgs.length };
                 return {
                     found: true,
+                    id: m.id?._serialized,
                     type: m.type,
                     mimetype: m.mimetype,
                     mediaStage: m.mediaData?.mediaStage,
                     hasMediaBlob: Boolean(m.mediaData?.mediaBlob),
                     hasPreview: Boolean(m.mediaData?.preview),
-                    directPath: m.directPath,
-                    totalModels: models.length
+                    hasRenderableUrl: Boolean(m.mediaData?.renderableUrl),
+                    totalModels: models.length,
+                    totalMediaFound: realMediaMsgs.length
                 };
             } catch (e) {
                 return { error: e.message || String(e) };
@@ -218,18 +232,23 @@ async function downloadMediaCustom(client, msg) {
                     try {
                         const coll = window.require('WAWebCollections').Msg;
                         if (!coll) return null;
-                        let found = coll.get(idStr);
-                        if (found) return found;
                         const models = coll.models || coll._models || [];
-                        found = models.find(m => m.id?._serialized === idStr || (m.id?.id && idStr.includes(m.id.id)));
-                        if (found) return found;
-                        try {
-                            const fetched = await coll.getMessagesById([idStr]);
-                            found = fetched?.messages?.[0] || fetched?.[0];
-                            if (found) return found;
-                        } catch (e) {}
-                        const mediaList = models.filter(m => m.isMedia || m.mediaData || m.type === 'image' || m.type === 'document');
-                        return mediaList[mediaList.length - 1] || null;
+                        
+                        const realMediaList = models.filter(m => 
+                            m.type === 'image' || 
+                            m.type === 'document' || 
+                            (m.mimetype && (m.mimetype.startsWith('image/') || m.mimetype === 'application/pdf'))
+                        );
+
+                        let found = coll.get(idStr);
+                        if (!found || found.type === 'chat') {
+                            const rawId = idStr.split('_')[2] || idStr;
+                            found = models.find(m => m.id?._serialized === idStr || m.id?.id === rawId);
+                        }
+                        if (!found || found.type === 'chat') {
+                            found = realMediaList[realMediaList.length - 1];
+                        }
+                        return found || null;
                     } catch (e) {
                         return null;
                     }
