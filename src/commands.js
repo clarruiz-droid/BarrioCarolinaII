@@ -183,11 +183,12 @@ async function downloadMediaCustom(client, msg) {
     // 2. Extractor avanzado directo desde el contexto de Puppeteer / WhatsApp Web
     try {
         if (!client || !client.pupPage) return null;
-        const msgId = msg.id._serialized;
+        const serializedId = msg.id?._serialized || (typeof msg.id === 'string' ? msg.id : '') || msg.id?.id || '';
 
-        console.log(`[Media] Msg info: type=${msg.type}, hasMedia=${msg.hasMedia}, mimetype=${msg.mimetype}`);
+        console.log(`[Media] Msg info: type=${msg.type}, hasMedia=${msg.hasMedia}, mimetype=${msg.mimetype}, id=${serializedId}`);
         const debugInfo = await client.pupPage.evaluate((msgId) => {
             try {
+                const idStr = String(msgId || '');
                 const coll = window.require('WAWebCollections').Msg;
                 const models = coll?.models || coll?._models || [];
                 
@@ -198,10 +199,10 @@ async function downloadMediaCustom(client, msg) {
                     (i.mimetype && (i.mimetype.startsWith('image/') || i.mimetype === 'application/pdf'))
                 );
 
-                let m = coll?.get(msgId);
+                let m = idStr ? coll?.get(idStr) : null;
                 if (!m || m.type === 'chat') {
-                    const rawId = msgId.split('_')[2] || msgId;
-                    m = models.find(i => i.id?._serialized === msgId || i.id?.id === rawId);
+                    const rawId = idStr.includes('_') ? idStr.split('_')[2] : idStr;
+                    m = models.find(i => (idStr && i.id?._serialized === idStr) || (rawId && i.id?.id === rawId));
                 }
                 if (!m || m.type === 'chat') {
                     m = realMediaMsgs[realMediaMsgs.length - 1];
@@ -223,13 +224,14 @@ async function downloadMediaCustom(client, msg) {
             } catch (e) {
                 return { error: e.message || String(e) };
             }
-        }, msgId);
+        }, serializedId);
         console.log('[Media Debug Info]:', JSON.stringify(debugInfo));
 
         const result = await client.pupPage.evaluate(async (msgId) => {
             try {
-                const findMsg = async (idStr) => {
+                const findMsg = async (idInput) => {
                     try {
+                        const idStrSafe = String(idInput || '');
                         const coll = window.require('WAWebCollections').Msg;
                         if (!coll) return null;
                         const models = coll.models || coll._models || [];
@@ -240,10 +242,10 @@ async function downloadMediaCustom(client, msg) {
                             (m.mimetype && (m.mimetype.startsWith('image/') || m.mimetype === 'application/pdf'))
                         );
 
-                        let found = coll.get(idStr);
+                        let found = idStrSafe ? coll.get(idStrSafe) : null;
                         if (!found || found.type === 'chat') {
-                            const rawId = idStr.split('_')[2] || idStr;
-                            found = models.find(m => m.id?._serialized === idStr || m.id?.id === rawId);
+                            const rawId = idStrSafe.includes('_') ? idStrSafe.split('_')[2] : idStrSafe;
+                            found = models.find(m => (idStrSafe && m.id?._serialized === idStrSafe) || (rawId && m.id?.id === rawId));
                         }
                         if (!found || found.type === 'chat') {
                             found = realMediaList[realMediaList.length - 1];
