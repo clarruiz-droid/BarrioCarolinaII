@@ -537,9 +537,13 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
             `• 💰 *Valor:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')}\n\n` +
             `${medioPagoTexto}\n\n` +
             `⚠️ *Importante:* Envía el comprobante de transferencia al administrador dentro de las *${config.HORAS_LIMITE_PAGO} hs* para confirmar tu jugada.\n\n` +
+            `👇 _(Abajo te enviamos el Alias para copiar directo)_\n\n` +
             `👉 *¿Deseas elegir otro número?* Escribe *1* para reservar otro o *0* para volver al menú principal.`;
 
         await sendReply(client, chatId, confirmacion);
+        if (config.DATOS_PAGO.alias) {
+            await sendReply(client, chatId, `${config.DATOS_PAGO.alias}`);
+        }
 
         // Notificar al titular por WhatsApp si es un teléfono diferente al que escribió
         const titularWaId = formatWhatsAppId(telefonoFinal);
@@ -551,8 +555,12 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
                 `• 🏠 *Domicilio:* ${domicilio}\n` +
                 `• 💰 *Valor:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')}\n\n` +
                 `${medioPagoTexto}\n\n` +
-                `⚠️ *Importante:* Envía el comprobante dentro de las *${config.HORAS_LIMITE_PAGO} hs* para confirmar tu jugada.`;
+                `⚠️ *Importante:* Envía el comprobante dentro de las *${config.HORAS_LIMITE_PAGO} hs* para confirmar tu jugada.\n\n` +
+                `👇 _(Abajo te enviamos el Alias para copiar directo)_`;
             await sendReply(client, titularWaId, avisoTitular);
+            if (config.DATOS_PAGO.alias) {
+                await sendReply(client, titularWaId, `${config.DATOS_PAGO.alias}`);
+            }
         }
 
         // Notificar al Grupo de Administración / Administradores
@@ -912,8 +920,12 @@ async function cmdDatosPago(client, chatId) {
         `• *Alias:* \`${config.DATOS_PAGO.alias}\`\n` +
         `• *CBU:* \`${config.DATOS_PAGO.cbu}\`\n` +
         `• *Titular:* ${config.DATOS_PAGO.titular}\n` +
-        `• *Banco:* ${config.DATOS_PAGO.banco}`;
+        `• *Banco:* ${config.DATOS_PAGO.banco}\n\n` +
+        `👇 _(Abajo te enviamos el Alias en un mensaje separado para copiar en 1 toque)_:`;
     await sendReply(client, chatId, text);
+    if (config.DATOS_PAGO.alias) {
+        await sendReply(client, chatId, `${config.DATOS_PAGO.alias}`);
+    }
 }
 
 async function cmdPremios(client, chatId) {
