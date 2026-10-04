@@ -164,12 +164,34 @@ async function notifyAdmins(client, text) {
 }
 
 /**
+ * Descarga archivos multimedia con reintentos para evitar fallos de WhatsApp Web
+ */
+async function downloadMediaWithRetry(msg, retries = 3, delayMs = 800) {
+    for (let i = 0; i < retries; i++) {
+        try {
+            const media = await msg.downloadMedia();
+            if (media && media.data) {
+                return media;
+            }
+        } catch (e) {
+            console.error(`[DownloadMedia Intento ${i + 1}/${retries}]:`, e.message);
+        }
+        if (i < retries - 1) {
+            await new Promise(r => setTimeout(r, delayMs));
+        }
+    }
+    return null;
+}
+
+/**
  * Procesa y valida automáticamente comprobantes de pago enviados por imágenes o PDF
  */
 async function handleReceiptMedia(msg, client, chatId, senderPhone, isUserAdmin) {
     try {
-        const media = await msg.downloadMedia();
+        console.log(`[Media] Recibido archivo multimedia de ${senderPhone}, descargando...`);
+        const media = await downloadMediaWithRetry(msg, 3, 800);
         if (!media || !media.data) {
+            console.error(`[Media Error] No se pudo descargar el archivo de ${senderPhone}`);
             return false;
         }
 
@@ -179,6 +201,7 @@ async function handleReceiptMedia(msg, client, chatId, senderPhone, isUserAdmin)
         );
 
         if (!isImageOrPdf) {
+            console.log(`[Media] Tipo no compatible: ${media.mimetype}`);
             return false;
         }
 
@@ -382,6 +405,10 @@ async function handleMessage(msg, client) {
     if (hasMedia && !isGroup) {
         const mediaHandled = await handleReceiptMedia(msg, client, senderChatId, senderPhone, isUserAdmin);
         if (mediaHandled) {
+            return;
+        } else {
+            console.log(`[Media] No se pudo interpretar el archivo de ${senderPhone} como comprobante.`);
+            await sendReply(client, senderChatId, `📥 Recibimos tu archivo multimedia.\n\nSi es un comprobante de pago, por favor asegúrate de enviar una imagen clara (o documento PDF) donde se lea el importe y la fecha.`);
             return;
         }
     }

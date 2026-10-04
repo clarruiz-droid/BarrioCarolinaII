@@ -44,7 +44,7 @@ module.exports = {
     MP_ACCESS_TOKEN: process.env.MP_ACCESS_TOKEN || "",
 
     // Configuración de Gemini AI para análisis automático de comprobantes
-    GEMINI_API_KEY: process.env.GEMINI_API_KEY || "",
+    GEMINI_API_KEY: (process.env.GEMINI_API_KEY || "").trim().replace(/^["']|["']$/g, ''),
     AUTO_APROBAR_COMPROBANTES: process.env.AUTO_APROBAR_COMPROBANTES !== "false",
 
     // Configuración del servidor Webhook

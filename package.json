@@ -1,6 +1,6 @@
 {
   "name": "bot-quiniela-carolina-ii",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Bot de WhatsApp para gestión de quiniela, reserva de números y control de pagos en Barrio Carolina II",
   "main": "src/index.js",
   "scripts": {

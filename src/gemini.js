@@ -59,8 +59,9 @@ Devuelve estrictamente un objeto JSON con la siguiente estructura:
 
         const result = await model.generateContent([prompt, imagePart]);
         const responseText = result.response.text();
+        const cleanJson = responseText.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
 
-        const parsed = JSON.parse(responseText);
+        const parsed = JSON.parse(cleanJson);
         return {
             success: true,
             data: parsed
