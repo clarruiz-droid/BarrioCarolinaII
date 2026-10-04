@@ -333,14 +333,23 @@ async function downloadMediaCustom(client, msg) {
                     }
                 } catch (errUrl) {}
 
-                // Opción D: A través del preview thumbnail en base64
+                // Opción D: A través del preview thumbnail en base64 o buffer
                 try {
                     if (msgObj.mediaData.preview) {
-                        let b64 = msgObj.mediaData.preview._b64 || msgObj.mediaData.preview;
-                        if (typeof b64 === 'string') {
+                        let prev = msgObj.mediaData.preview;
+                        let b64 = prev._b64 || (typeof prev === 'string' ? prev : null);
+                        if (b64 && typeof b64 === 'string') {
                             b64 = b64.replace(/^data:image\/[a-z]+;base64,/, '');
                             return {
                                 data: b64,
+                                mimetype: 'image/jpeg',
+                                filename: 'comprobante.jpg'
+                            };
+                        } else if (prev instanceof ArrayBuffer || prev?.buffer instanceof ArrayBuffer) {
+                            const buf = prev instanceof ArrayBuffer ? prev : prev.buffer;
+                            const data = await window.WWebJS.arrayBufferToBase64Async(buf);
+                            return {
+                                data,
                                 mimetype: 'image/jpeg',
                                 filename: 'comprobante.jpg'
                             };
@@ -381,7 +390,7 @@ async function downloadMediaCustom(client, msg) {
             } catch (eDOM) {}
 
             return null;
-        }, msgId);
+        }, serializedId);
 
         if (result && result.data) {
             console.log('[Media] ✅ Archivo multimedia extraído exitosamente vía DOM / Blob.');
