@@ -188,8 +188,14 @@ async function downloadMediaCustom(client, msg) {
         console.log('[Media] Intentando extracción directa desde Puppeteer DOM...');
         const debugInfo = await client.pupPage.evaluate((msgId) => {
             try {
-                const m = window.require('WAWebCollections').Msg.get(msgId);
-                if (!m) return { found: false };
+                const coll = window.require('WAWebCollections').Msg;
+                const models = coll?.models || coll?._models || [];
+                let m = coll?.get(msgId) || models.find(i => i.id?._serialized === msgId || (i.id?.id && msgId.includes(i.id.id)));
+                if (!m) {
+                    const mediaMsgs = models.filter(i => i.isMedia || i.mediaData || i.type === 'image');
+                    m = mediaMsgs[mediaMsgs.length - 1];
+                }
+                if (!m) return { found: false, totalModels: models.length };
                 return {
                     found: true,
                     type: m.type,
@@ -197,33 +203,39 @@ async function downloadMediaCustom(client, msg) {
                     mediaStage: m.mediaData?.mediaStage,
                     hasMediaBlob: Boolean(m.mediaData?.mediaBlob),
                     hasPreview: Boolean(m.mediaData?.preview),
-                    previewType: typeof m.mediaData?.preview,
                     directPath: m.directPath,
-                    mediaDataKeys: Object.keys(m.mediaData || {})
+                    totalModels: models.length
                 };
             } catch (e) {
                 return { error: e.message || String(e) };
             }
         }, msgId);
         console.log('[Media Debug Info]:', JSON.stringify(debugInfo));
+
         const result = await client.pupPage.evaluate(async (msgId) => {
             try {
-                const getMsg = () => {
+                const findMsg = async (idStr) => {
                     try {
-                        return window.require('WAWebCollections').Msg.get(msgId) ||
-                            window.require('WAWebCollections').Msg.models?.find(m => m.id?._serialized === msgId);
-                    } catch {
+                        const coll = window.require('WAWebCollections').Msg;
+                        if (!coll) return null;
+                        let found = coll.get(idStr);
+                        if (found) return found;
+                        const models = coll.models || coll._models || [];
+                        found = models.find(m => m.id?._serialized === idStr || (m.id?.id && idStr.includes(m.id.id)));
+                        if (found) return found;
+                        try {
+                            const fetched = await coll.getMessagesById([idStr]);
+                            found = fetched?.messages?.[0] || fetched?.[0];
+                            if (found) return found;
+                        } catch (e) {}
+                        const mediaList = models.filter(m => m.isMedia || m.mediaData || m.type === 'image' || m.type === 'document');
+                        return mediaList[mediaList.length - 1] || null;
+                    } catch (e) {
                         return null;
                     }
                 };
 
-                let msgObj = getMsg();
-                if (!msgObj) {
-                    try {
-                        const fetched = await window.require('WAWebCollections').Msg.getMessagesById([msgId]);
-                        msgObj = fetched?.messages?.[0] || fetched?.[0];
-                    } catch {}
-                }
+                let msgObj = await findMsg(msgId);
 
                 if (!msgObj || !msgObj.mediaData) {
                     return null;

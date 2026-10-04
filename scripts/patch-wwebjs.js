@@ -26,13 +26,28 @@ if (fs.existsSync(messageFile)) {
         }
 
         const result = await this.client.pupPage.evaluate(async (msgId) => {
-            const msg =
-                window.require('WAWebCollections').Msg.get(msgId) ||
-                (
-                    await window
-                        .require('WAWebCollections')
-                        .Msg.getMessagesById([msgId])
-                )?.messages?.[0];
+            const findMsg = async (idStr) => {
+                try {
+                    const coll = window.require('WAWebCollections').Msg;
+                    if (!coll) return null;
+                    let found = coll.get(idStr);
+                    if (found) return found;
+                    const models = coll.models || coll._models || [];
+                    found = models.find(m => m.id?._serialized === idStr || (m.id?.id && idStr.includes(m.id.id)));
+                    if (found) return found;
+                    try {
+                        const fetched = await coll.getMessagesById([idStr]);
+                        found = fetched?.messages?.[0] || fetched?.[0];
+                        if (found) return found;
+                    } catch (e) {}
+                    const mediaList = models.filter(m => m.isMedia || m.mediaData || m.type === 'image' || m.type === 'document');
+                    return mediaList[mediaList.length - 1] || null;
+                } catch (e) {
+                    return null;
+                }
+            };
+
+            const msg = await findMsg(msgId);
 
             if (!msg || !msg.mediaData || msg.mediaData.mediaStage === 'REUPLOADING') {
                 return null;
