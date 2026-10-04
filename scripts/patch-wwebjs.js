@@ -72,6 +72,8 @@ if (fs.existsSync(messageFile)) {
             const mediaKeyTimestamp = msg.mediaKeyTimestamp || msg.mediaData?.mediaKeyTimestamp;
             const mediaType = msg.type || msg.mediaData?.type || 'image';
 
+            const mime = msg.mimetype || msg.mediaData?.mimetype || 'image/jpeg';
+
             try {
                 const mockQpl = new Proxy({}, { get: () => () => mockQpl });
                 const decryptedMedia = await window
@@ -83,6 +85,7 @@ if (fs.existsSync(messageFile)) {
                         mediaKey: mediaKey,
                         mediaKeyTimestamp: mediaKeyTimestamp,
                         type: mediaType,
+                        mimetype: mime,
                         signal: new AbortController().signal,
                         downloadQpl: mockQpl,
                     });

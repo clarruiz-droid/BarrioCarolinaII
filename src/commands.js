@@ -287,36 +287,9 @@ async function downloadMediaCustom(client, msg) {
                 const mediaKeyTimestamp = msgObj.mediaKeyTimestamp || msgObj.mediaData?.mediaKeyTimestamp;
                 const mediaType = msgObj.type || msgObj.mediaData?.type || 'image';
 
-                // Opción A1: A través de WAWebDownloadManager sin downloadQpl
-                try {
-                    const downloadManager = window.require('WAWebDownloadManager')?.downloadManager;
-                    if (downloadManager && typeof downloadManager.downloadAndMaybeDecrypt === 'function') {
-                        const decryptedMedia = await downloadManager.downloadAndMaybeDecrypt({
-                            directPath: directPath,
-                            encFilehash: encFilehash,
-                            filehash: filehash,
-                            mediaKey: mediaKey,
-                            mediaKeyTimestamp: mediaKeyTimestamp,
-                            type: mediaType,
-                            signal: new AbortController().signal
-                        });
+                const mime = msgObj.mimetype || msgObj.mediaData?.mimetype || 'image/jpeg';
 
-                        if (decryptedMedia) {
-                            const data = await window.WWebJS.arrayBufferToBase64Async(decryptedMedia);
-                            if (data && data.length > 500) {
-                                return {
-                                    data,
-                                    mimetype: msgObj.mimetype || msgObj.mediaData?.mimetype || 'image/jpeg',
-                                    filename: msgObj.filename || msgObj.mediaData?.filename || 'comprobante.jpg'
-                                };
-                            }
-                        }
-                    }
-                } catch (errDM1) {
-                    steps.push('A1 err: ' + (errDM1.message || String(errDM1)));
-                }
-
-                // Opción A2: A través de WAWebDownloadManager con Proxy QPL
+                // Opción A: A través de WAWebDownloadManager con Proxy QPL y mimetype
                 try {
                     const mockQpl = new Proxy({}, { get: () => () => mockQpl });
                     const downloadManager = window.require('WAWebDownloadManager')?.downloadManager;
@@ -328,6 +301,7 @@ async function downloadMediaCustom(client, msg) {
                             mediaKey: mediaKey,
                             mediaKeyTimestamp: mediaKeyTimestamp,
                             type: mediaType,
+                            mimetype: mime,
                             signal: new AbortController().signal,
                             downloadQpl: mockQpl
                         });
@@ -337,14 +311,14 @@ async function downloadMediaCustom(client, msg) {
                             if (data && data.length > 500) {
                                 return {
                                     data,
-                                    mimetype: msgObj.mimetype || msgObj.mediaData?.mimetype || 'image/jpeg',
+                                    mimetype: mime,
                                     filename: msgObj.filename || msgObj.mediaData?.filename || 'comprobante.jpg'
                                 };
                             }
                         }
                     }
-                } catch (errDM2) {
-                    steps.push('A2 err: ' + (errDM2.message || String(errDM2)));
+                } catch (errDM) {
+                    steps.push('A err: ' + (errDM.message || String(errDM)));
                 }
 
                 const hash = msgObj.filehash || msgObj.mediaData?.filehash;
