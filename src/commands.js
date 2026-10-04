@@ -89,13 +89,42 @@ function isAdmin(phone, msg) {
     });
 }
 
+// Registro de mensajes enviados recientemente por el bot para prevenir bucles de auto-procesamiento
+const recentBotMessages = new Set();
+
+function recordSentMessage(text) {
+    if (!text) return;
+    const key = String(text).trim();
+    recentBotMessages.add(key);
+    setTimeout(() => {
+        recentBotMessages.delete(key);
+    }, 30000);
+}
+
 /**
  * Detecta si un mensaje fue generado automáticamente por el bot para no responderse a sí mismo
  */
 function isBotGeneratedMessage(text) {
     if (!text) return true;
-    const botMarkers = ['🎲', '👋', '✅', '❌', '🎉', '📋', '•', '🔢', '👤', '🏠', '💳', '⏳', '📊', '🔒', '📢', '♻️', 'ℹ️', '⚠️', '👉', '🔙', '👑', '🏆', '🔔', '📱', '━'];
-    return botMarkers.some(marker => text.startsWith(marker));
+    const cleanText = String(text).trim();
+    if (recentBotMessages.has(cleanText)) {
+        return true;
+    }
+    const botMarkers = [
+        '🎲', '👋', '✅', '❌', '🎉', '📋', '•', '🔢', '👤', '🏠', '💳', 
+        '⏳', '📊', '🔒', '📢', '♻️', 'ℹ️', '⚠️', '👉', '🔙', '👑', '🏆', 
+        '🔔', '📱', '━', '📥', '🚨', '🤖', '🎁', '💰', '📅', '🎯', '🧾', 
+        '💡', '📲', '🟢', '🟡', '⚪', '👏'
+    ];
+    if (botMarkers.some(marker => cleanText.startsWith(marker))) {
+        return true;
+    }
+    if (config.DATOS_PAGO && config.DATOS_PAGO.alias) {
+        if (cleanText.toLowerCase() === config.DATOS_PAGO.alias.toLowerCase()) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /**
@@ -103,6 +132,9 @@ function isBotGeneratedMessage(text) {
  */
 async function sendReply(client, chatId, text) {
     try {
+        if (text) {
+            recordSentMessage(text);
+        }
         await client.sendMessage(chatId, text);
         return true;
     } catch (e) {
