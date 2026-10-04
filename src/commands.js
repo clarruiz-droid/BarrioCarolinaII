@@ -412,10 +412,11 @@ async function downloadMediaCustom(client, msg) {
                 console.error('Error dentro de evaluate media:', errEval);
             }
 
-            // Opción E: Extractor directo del DOM buscando elementos <img> con src blob o base64
+            // Opción F: Extractor directo del DOM buscando elementos <img> reales (sin miniaturas o gifs 1x1)
             try {
                 const imgs = Array.from(document.querySelectorAll('img')).filter(img => 
-                    img.src && (img.src.startsWith('blob:') || img.src.startsWith('data:image'))
+                    img.src && 
+                    (img.src.startsWith('blob:') || (img.src.startsWith('data:image') && !img.src.includes('image/gif') && img.src.length > 2000))
                 );
                 if (imgs.length > 0) {
                     const lastImg = imgs[imgs.length - 1];

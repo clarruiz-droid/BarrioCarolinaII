@@ -69,7 +69,27 @@ Devuelve estrictamente un objeto JSON con la siguiente estructura:
                 }
             });
 
-            const result = await model.generateContent([prompt, imagePart]);
+            let result = null;
+            let success = false;
+            let attempt = 0;
+
+            while (attempt < 3 && !success) {
+                try {
+                    result = await model.generateContent([prompt, imagePart]);
+                    success = true;
+                } catch (apiErr) {
+                    if (apiErr.message && (apiErr.message.includes('503') || apiErr.message.includes('high demand'))) {
+                        attempt++;
+                        console.log(`[Gemini] Reintento ${attempt}/3 por alta demanda en ${modelName}...`);
+                        await new Promise(r => setTimeout(r, 1500));
+                    } else {
+                        throw apiErr;
+                    }
+                }
+            }
+
+            if (!result) throw new Error('No se obtuvo respuesta del modelo');
+
             const responseText = result.response.text();
             const cleanJson = responseText.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
 

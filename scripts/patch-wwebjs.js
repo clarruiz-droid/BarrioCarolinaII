@@ -65,31 +65,37 @@ if (fs.existsSync(messageFile)) {
                 waitCount++;
             }
 
+            const directPath = msg.directPath || msg.mediaData?.directPath;
+            const encFilehash = msg.encFilehash || msg.mediaData?.encFilehash;
+            const filehash = msg.filehash || msg.mediaData?.filehash;
+            const mediaKey = msg.mediaKey || msg.mediaData?.mediaKey;
+            const mediaKeyTimestamp = msg.mediaKeyTimestamp || msg.mediaData?.mediaKeyTimestamp;
+            const mediaType = msg.type || msg.mediaData?.type || 'image';
+
             try {
-                const mockQpl = {
-                    addAnnotations: function () { return this; },
-                    addPoint: function () { return this; },
-                };
+                const mockQpl = new Proxy({}, { get: () => () => mockQpl });
                 const decryptedMedia = await window
                     .require('WAWebDownloadManager')
                     .downloadManager.downloadAndMaybeDecrypt({
-                        directPath: msg.directPath,
-                        encFilehash: msg.encFilehash,
-                        filehash: msg.filehash,
-                        mediaKey: msg.mediaKey,
-                        mediaKeyTimestamp: msg.mediaKeyTimestamp,
-                        type: msg.type,
+                        directPath: directPath,
+                        encFilehash: encFilehash,
+                        filehash: filehash,
+                        mediaKey: mediaKey,
+                        mediaKeyTimestamp: mediaKeyTimestamp,
+                        type: mediaType,
                         signal: new AbortController().signal,
                         downloadQpl: mockQpl,
                     });
 
                 const data = await window.WWebJS.arrayBufferToBase64Async(decryptedMedia);
-                return {
-                    data,
-                    mimetype: msg.mimetype,
-                    filename: msg.filename,
-                    filesize: msg.size,
-                };
+                if (data && data.length > 500) {
+                    return {
+                        data,
+                        mimetype: msg.mimetype || msg.mediaData?.mimetype || 'image/jpeg',
+                        filename: msg.filename || msg.mediaData?.filename || 'comprobante.jpg',
+                        filesize: msg.size || data.length,
+                    };
+                }
             } catch (e) {
                 // Fallback 1: Si existe mediaBlob OpaqueData
                 try {
