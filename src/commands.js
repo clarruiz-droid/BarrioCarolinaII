@@ -278,9 +278,9 @@ async function downloadMediaCustom(client, msg) {
                     wait++;
                 }
 
-                // Opción A: A través de WAWebDownloadManager
+                // Opción A: A través de WAWebDownloadManager con Proxy QPL seguro
                 try {
-                    const mockQpl = { addAnnotations: () => mockQpl, addPoint: () => mockQpl };
+                    const mockQpl = new Proxy({}, { get: () => () => mockQpl });
                     const downloadManager = window.require('WAWebDownloadManager')?.downloadManager;
                     if (downloadManager && typeof downloadManager.downloadAndMaybeDecrypt === 'function') {
                         const decryptedMedia = await downloadManager.downloadAndMaybeDecrypt({
@@ -303,9 +303,51 @@ async function downloadMediaCustom(client, msg) {
                             };
                         }
                     }
-                } catch (errDM) {}
+                } catch (errDM) {
+                    console.log('Error en downloadAndMaybeDecrypt:', errDM);
+                }
 
-                // Opción B: A través de Blob en mediaData
+                const hash = msgObj.filehash || msgObj.mediaData?.filehash;
+
+                // Opción B: A través de WAWebMediaInMemoryBlobCache (alta resolución)
+                try {
+                    if (hash) {
+                        const cacheObj = window.require('WAWebMediaInMemoryBlobCache')?.InMemoryMediaBlobCache?.get(hash);
+                        if (cacheObj) {
+                            let buf = null;
+                            if (typeof cacheObj.arrayBuffer === 'function') buf = await cacheObj.arrayBuffer();
+                            else if (cacheObj instanceof ArrayBuffer) buf = cacheObj;
+                            else if (cacheObj.buffer instanceof ArrayBuffer) buf = cacheObj.buffer;
+                            if (buf) {
+                                const data = await window.WWebJS.arrayBufferToBase64Async(buf);
+                                return {
+                                    data,
+                                    mimetype: msgObj.mimetype || 'image/jpeg',
+                                    filename: msgObj.filename || 'comprobante.jpg'
+                                };
+                            }
+                        }
+                    }
+                } catch (errCache) {}
+
+                // Opción C: A través de WAWebMediaStorage (alta resolución)
+                try {
+                    if (hash) {
+                        const mediaObj = window.require('WAWebMediaStorage')?.getOrCreateMediaObject(hash);
+                        const blob = mediaObj?.mediaBlob;
+                        if (blob && typeof blob.arrayBuffer === 'function') {
+                            const buf = await blob.arrayBuffer();
+                            const data = await window.WWebJS.arrayBufferToBase64Async(buf);
+                            return {
+                                data,
+                                mimetype: msgObj.mimetype || 'image/jpeg',
+                                filename: msgObj.filename || 'comprobante.jpg'
+                            };
+                        }
+                    }
+                } catch (errStorage) {}
+
+                // Opción D: A través de Blob en mediaData
                 try {
                     const blob = msgObj.mediaData.mediaBlob || msgObj.mediaData._blob;
                     if (blob && typeof blob.arrayBuffer === 'function') {
@@ -319,7 +361,7 @@ async function downloadMediaCustom(client, msg) {
                     }
                 } catch (errBlob) {}
 
-                // Opción C: A través de renderableUrl si está cargado
+                // Opción E: A través de renderableUrl si está cargado
                 try {
                     if (msgObj.mediaData.renderableUrl) {
                         const resp = await fetch(msgObj.mediaData.renderableUrl);
