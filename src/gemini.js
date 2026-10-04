@@ -23,18 +23,16 @@ async function analyzeReceipt(base64Data, mimeType = 'image/jpeg') {
         };
     }
 
-    try {
-        const genAI = new GoogleGenerativeAI(config.GEMINI_API_KEY);
-        // gemini-1.5-flash o gemini-2.0-flash: muy rápido y preciso para extracción de texto en imágenes
-        const model = genAI.getGenerativeModel({
-            model: 'gemini-1.5-flash',
-            generationConfig: {
-                responseMimeType: 'application/json',
-                temperature: 0.1
-            }
-        });
+    const candidateModels = [
+        'gemini-2.5-flash',
+        'gemini-2.0-flash',
+        'gemini-1.5-flash-latest',
+        'gemini-1.5-flash',
+        'gemini-2.0-flash-exp',
+        'gemini-1.5-pro'
+    ];
 
-        const prompt = `Analiza este comprobante de transferencia o pago bancario/billetera virtual (ej: Mercado Pago, Cuenta DNI, BNA+, Ualá, Banco Galicia, Santander, BBVA, Macro, Brubank, Naranja X, etc.) y extrae los datos con la máxima fidelidad posible.
+    const prompt = `Analiza este comprobante de transferencia o pago bancario/billetera virtual (ej: Mercado Pago, Cuenta DNI, BNA+, Ualá, Banco Galicia, Santander, BBVA, Macro, Brubank, Naranja X, etc.) y extrae los datos con la máxima fidelidad posible.
 
 Devuelve estrictamente un objeto JSON con la siguiente estructura:
 {
@@ -50,30 +48,49 @@ Devuelve estrictamente un objeto JSON con la siguiente estructura:
   "resumen_lectura": string (breve resumen de 1 línea de lo detectado, ej: "Transferencia de $2000 a Comisión Vecinal por Mercado Pago")
 }`;
 
-        const imagePart = {
-            inlineData: {
-                data: base64Data,
-                mimeType: mimeType
-            }
-        };
+    const imagePart = {
+        inlineData: {
+            data: base64Data,
+            mimeType: mimeType || 'image/jpeg'
+        }
+    };
 
-        const result = await model.generateContent([prompt, imagePart]);
-        const responseText = result.response.text();
-        const cleanJson = responseText.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
+    const genAI = new GoogleGenerativeAI(config.GEMINI_API_KEY);
+    let lastError = null;
 
-        const parsed = JSON.parse(cleanJson);
-        return {
-            success: true,
-            data: parsed
-        };
-    } catch (error) {
-        console.error('[Gemini Error] Error al analizar comprobante:', error.message || error);
-        return {
-            success: false,
-            error: error.message || 'ERROR_ANALYZING',
-            details: error
-        };
+    for (const modelName of candidateModels) {
+        try {
+            console.log(`[Gemini] Probando análisis con modelo: ${modelName}...`);
+            const model = genAI.getGenerativeModel({
+                model: modelName,
+                generationConfig: {
+                    responseMimeType: 'application/json',
+                    temperature: 0.1
+                }
+            });
+
+            const result = await model.generateContent([prompt, imagePart]);
+            const responseText = result.response.text();
+            const cleanJson = responseText.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
+
+            const parsed = JSON.parse(cleanJson);
+            console.log(`[Gemini] ✅ Análisis exitoso con ${modelName}:`, JSON.stringify(parsed));
+            return {
+                success: true,
+                data: parsed
+            };
+        } catch (err) {
+            console.log(`[Gemini] Modelo ${modelName} no disponible:`, err.message || err);
+            lastError = err;
+        }
     }
+
+    console.error('[Gemini Error] Fallaron todos los modelos candidatos:', lastError?.message || lastError);
+    return {
+        success: false,
+        error: lastError?.message || 'ERROR_ANALYZING',
+        details: lastError
+    };
 }
 
 module.exports = {
