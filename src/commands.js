@@ -280,14 +280,58 @@ async function downloadMediaCustom(client, msg) {
                     }
                 } catch (errUrl) {}
 
+                // Opción D: A través del preview thumbnail en base64
+                try {
+                    if (msgObj.mediaData.preview) {
+                        let b64 = msgObj.mediaData.preview._b64 || msgObj.mediaData.preview;
+                        if (typeof b64 === 'string') {
+                            b64 = b64.replace(/^data:image\/[a-z]+;base64,/, '');
+                            return {
+                                data: b64,
+                                mimetype: 'image/jpeg',
+                                filename: 'comprobante.jpg'
+                            };
+                        }
+                    }
+                } catch (errPrev) {}
+
             } catch (errEval) {
                 console.error('Error dentro de evaluate media:', errEval);
             }
+
+            // Opción E: Extractor directo del DOM buscando elementos <img> con src blob o base64
+            try {
+                const imgs = Array.from(document.querySelectorAll('img')).filter(img => 
+                    img.src && (img.src.startsWith('blob:') || img.src.startsWith('data:image'))
+                );
+                if (imgs.length > 0) {
+                    const lastImg = imgs[imgs.length - 1];
+                    if (lastImg.src.startsWith('data:image')) {
+                        const parts = lastImg.src.split(',');
+                        const mime = parts[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
+                        return {
+                            data: parts[1],
+                            mimetype: mime,
+                            filename: 'comprobante.jpg'
+                        };
+                    } else if (lastImg.src.startsWith('blob:')) {
+                        const resp = await fetch(lastImg.src);
+                        const buf = await resp.arrayBuffer();
+                        const data = await window.WWebJS.arrayBufferToBase64Async(buf);
+                        return {
+                            data,
+                            mimetype: 'image/jpeg',
+                            filename: 'comprobante.jpg'
+                        };
+                    }
+                }
+            } catch (eDOM) {}
+
             return null;
         }, msgId);
 
         if (result && result.data) {
-            console.log('[Media] ✅ Archivo multimedia extraído exitosamente vía DOM.');
+            console.log('[Media] ✅ Archivo multimedia extraído exitosamente vía DOM / Blob.');
             return result;
         }
     } catch (errCustom) {
