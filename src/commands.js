@@ -164,22 +164,136 @@ async function notifyAdmins(client, text) {
 }
 
 /**
- * Descarga archivos multimedia con reintentos para evitar fallos de WhatsApp Web
+ * Descarga archivos multimedia con múltiples métodos de respaldo (estándar, DOM directo y buffers)
  */
-async function downloadMediaWithRetry(msg, retries = 3, delayMs = 800) {
-    for (let i = 0; i < retries; i++) {
+async function downloadMediaCustom(client, msg) {
+    // 1. Intentar método nativo de whatsapp-web.js con reintentos
+    for (let i = 0; i < 2; i++) {
         try {
             const media = await msg.downloadMedia();
             if (media && media.data) {
                 return media;
             }
         } catch (e) {
-            console.error(`[DownloadMedia Intento ${i + 1}/${retries}]:`, e.message);
+            console.log(`[Media] Descarga nativa intento ${i + 1} falló:`, e.message || e);
         }
-        if (i < retries - 1) {
-            await new Promise(r => setTimeout(r, delayMs));
-        }
+        await new Promise(r => setTimeout(r, 600));
     }
+
+    // 2. Extractor avanzado directo desde el contexto de Puppeteer / WhatsApp Web
+    try {
+        if (!client || !client.pupPage) return null;
+        const msgId = msg.id._serialized;
+
+        console.log('[Media] Intentando extracción directa desde Puppeteer DOM...');
+        const result = await client.pupPage.evaluate(async (msgId) => {
+            try {
+                const getMsg = () => {
+                    try {
+                        return window.require('WAWebCollections').Msg.get(msgId) ||
+                            window.require('WAWebCollections').Msg.models?.find(m => m.id?._serialized === msgId);
+                    } catch {
+                        return null;
+                    }
+                };
+
+                let msgObj = getMsg();
+                if (!msgObj) {
+                    try {
+                        const fetched = await window.require('WAWebCollections').Msg.getMessagesById([msgId]);
+                        msgObj = fetched?.messages?.[0] || fetched?.[0];
+                    } catch {}
+                }
+
+                if (!msgObj || !msgObj.mediaData) {
+                    return null;
+                }
+
+                // Disparar descarga en segundo plano si aún no está listo
+                if (msgObj.mediaData.mediaStage !== 'RESOLVED') {
+                    try {
+                        if (typeof msgObj.downloadMedia === 'function') {
+                            await msgObj.downloadMedia({ downloadEvenIfExpensive: true, rmrReason: 1 });
+                        }
+                    } catch (e) {}
+                }
+
+                // Esperar a que el estado se resuelva
+                let wait = 0;
+                while (msgObj.mediaData.mediaStage === 'FETCHING' && wait < 8) {
+                    await new Promise(r => setTimeout(r, 400));
+                    wait++;
+                }
+
+                // Opción A: A través de WAWebDownloadManager
+                try {
+                    const mockQpl = { addAnnotations: () => mockQpl, addPoint: () => mockQpl };
+                    const downloadManager = window.require('WAWebDownloadManager')?.downloadManager;
+                    if (downloadManager && typeof downloadManager.downloadAndMaybeDecrypt === 'function') {
+                        const decryptedMedia = await downloadManager.downloadAndMaybeDecrypt({
+                            directPath: msgObj.directPath,
+                            encFilehash: msgObj.encFilehash,
+                            filehash: msgObj.filehash,
+                            mediaKey: msgObj.mediaKey,
+                            mediaKeyTimestamp: msgObj.mediaKeyTimestamp,
+                            type: msgObj.type,
+                            signal: new AbortController().signal,
+                            downloadQpl: mockQpl,
+                        });
+
+                        if (decryptedMedia) {
+                            const data = await window.WWebJS.arrayBufferToBase64Async(decryptedMedia);
+                            return {
+                                data,
+                                mimetype: msgObj.mimetype || 'image/jpeg',
+                                filename: msgObj.filename || 'comprobante.jpg'
+                            };
+                        }
+                    }
+                } catch (errDM) {}
+
+                // Opción B: A través de Blob en mediaData
+                try {
+                    const blob = msgObj.mediaData.mediaBlob || msgObj.mediaData._blob;
+                    if (blob && typeof blob.arrayBuffer === 'function') {
+                        const buf = await blob.arrayBuffer();
+                        const data = await window.WWebJS.arrayBufferToBase64Async(buf);
+                        return {
+                            data,
+                            mimetype: msgObj.mimetype || 'image/jpeg',
+                            filename: msgObj.filename || 'comprobante.jpg'
+                        };
+                    }
+                } catch (errBlob) {}
+
+                // Opción C: A través de renderableUrl si está cargado
+                try {
+                    if (msgObj.mediaData.renderableUrl) {
+                        const resp = await fetch(msgObj.mediaData.renderableUrl);
+                        const buf = await resp.arrayBuffer();
+                        const data = await window.WWebJS.arrayBufferToBase64Async(buf);
+                        return {
+                            data,
+                            mimetype: msgObj.mimetype || 'image/jpeg',
+                            filename: msgObj.filename || 'comprobante.jpg'
+                        };
+                    }
+                } catch (errUrl) {}
+
+            } catch (errEval) {
+                console.error('Error dentro de evaluate media:', errEval);
+            }
+            return null;
+        }, msgId);
+
+        if (result && result.data) {
+            console.log('[Media] ✅ Archivo multimedia extraído exitosamente vía DOM.');
+            return result;
+        }
+    } catch (errCustom) {
+        console.error('[Media Custom Extractor Error]:', errCustom.message || errCustom);
+    }
+
     return null;
 }
 
@@ -188,8 +302,8 @@ async function downloadMediaWithRetry(msg, retries = 3, delayMs = 800) {
  */
 async function handleReceiptMedia(msg, client, chatId, senderPhone, isUserAdmin) {
     try {
-        console.log(`[Media] Recibido archivo multimedia de ${senderPhone}, descargando...`);
-        const media = await downloadMediaWithRetry(msg, 3, 800);
+        console.log(`[Media] Recibido archivo multimedia de ${senderPhone}, extrayendo...`);
+        const media = await downloadMediaCustom(client, msg);
         if (!media || !media.data) {
             console.error(`[Media Error] No se pudo descargar el archivo de ${senderPhone}`);
             return false;
