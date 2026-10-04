@@ -24,12 +24,12 @@ async function analyzeReceipt(base64Data, mimeType = 'image/jpeg') {
     }
 
     const candidateModels = [
+        'gemini-3.8-flash',
+        'gemini-3.8-pro',
+        'gemini-3-flash',
+        'gemini-3-pro',
         'gemini-2.5-flash',
-        'gemini-2.0-flash',
-        'gemini-1.5-flash-latest',
-        'gemini-1.5-flash',
-        'gemini-2.0-flash-exp',
-        'gemini-1.5-pro'
+        'gemini-2.0-flash'
     ];
 
     const prompt = `Analiza este comprobante de transferencia o pago bancario/billetera virtual (ej: Mercado Pago, Cuenta DNI, BNA+, Ualá, Banco Galicia, Santander, BBVA, Macro, Brubank, Naranja X, etc.) y extrae los datos con la máxima fidelidad posible.
