@@ -278,33 +278,42 @@ async function downloadMediaCustom(client, msg) {
                     wait++;
                 }
 
-                // Opción A: A través de WAWebDownloadManager con Proxy QPL seguro
+                const directPath = msgObj.directPath || msgObj.mediaData?.directPath;
+                const encFilehash = msgObj.encFilehash || msgObj.mediaData?.encFilehash;
+                const filehash = msgObj.filehash || msgObj.mediaData?.filehash;
+                const mediaKey = msgObj.mediaKey || msgObj.mediaData?.mediaKey;
+                const mediaKeyTimestamp = msgObj.mediaKeyTimestamp || msgObj.mediaData?.mediaKeyTimestamp;
+                const mediaType = msgObj.type || msgObj.mediaData?.type || 'image';
+
+                // Opción A: A través de WAWebDownloadManager con Proxy QPL seguro y campos combinados
                 try {
                     const mockQpl = new Proxy({}, { get: () => () => mockQpl });
                     const downloadManager = window.require('WAWebDownloadManager')?.downloadManager;
                     if (downloadManager && typeof downloadManager.downloadAndMaybeDecrypt === 'function') {
                         const decryptedMedia = await downloadManager.downloadAndMaybeDecrypt({
-                            directPath: msgObj.directPath,
-                            encFilehash: msgObj.encFilehash,
-                            filehash: msgObj.filehash,
-                            mediaKey: msgObj.mediaKey,
-                            mediaKeyTimestamp: msgObj.mediaKeyTimestamp,
-                            type: msgObj.type,
+                            directPath: directPath,
+                            encFilehash: encFilehash,
+                            filehash: filehash,
+                            mediaKey: mediaKey,
+                            mediaKeyTimestamp: mediaKeyTimestamp,
+                            type: mediaType,
                             signal: new AbortController().signal,
                             downloadQpl: mockQpl,
                         });
 
                         if (decryptedMedia) {
                             const data = await window.WWebJS.arrayBufferToBase64Async(decryptedMedia);
-                            return {
-                                data,
-                                mimetype: msgObj.mimetype || 'image/jpeg',
-                                filename: msgObj.filename || 'comprobante.jpg'
-                            };
+                            if (data && data.length > 500) {
+                                return {
+                                    data,
+                                    mimetype: msgObj.mimetype || msgObj.mediaData?.mimetype || 'image/jpeg',
+                                    filename: msgObj.filename || msgObj.mediaData?.filename || 'comprobante.jpg'
+                                };
+                            }
                         }
                     }
                 } catch (errDM) {
-                    console.log('Error en downloadAndMaybeDecrypt:', errDM);
+                    // registrar error en objeto
                 }
 
                 const hash = msgObj.filehash || msgObj.mediaData?.filehash;
@@ -486,6 +495,8 @@ async function handleReceiptMedia(msg, client, chatId, senderPhone, isUserAdmin)
         // Mensaje de feedback inmediato
         await sendReply(client, chatId, `⏳ *Analizando tu comprobante de pago con Inteligencia Artificial...*`);
 
+        const kbSize = Math.round((media.data?.length || 0) * 0.75 / 1024);
+        console.log(`[Gemini] Enviando imagen a analizar (${kbSize} KB, mimetype: ${media.mimetype})...`);
         const analysis = await gemini.analyzeReceipt(media.data, media.mimetype);
 
         if (!analysis.success || !analysis.data) {
