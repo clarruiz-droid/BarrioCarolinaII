@@ -742,29 +742,20 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
 
         let medioPagoTexto = '';
         if (paymentLink) {
-            medioPagoTexto += `💳 *Pagar con Mercado Pago (Tarjeta / Débito / Dinero en cuenta):*\n👉 ${paymentLink}\n\n`;
-            medioPagoTexto += `🏦 *O por Transferencia Bancaria:*\n`;
+            medioPagoTexto += `💳 *Pagar con Mercado Pago:*\n👉 ${paymentLink}\n\n`;
+            medioPagoTexto += `🏦 *O por Transferencia:*\n• *Alias:* \`${config.DATOS_PAGO.alias}\`\n📸 Compartir el comprobante a este mismo número.`;
         } else {
-            medioPagoTexto += `🏦 *Datos para transferir:*\n`;
+            medioPagoTexto += `🏦 *Transferencia:*\n• *Alias:* \`${config.DATOS_PAGO.alias}\`\n📸 Compartir el comprobante a este mismo número.`;
         }
-        medioPagoTexto += 
-            `• *Alias:* \`${config.DATOS_PAGO.alias}\`\n` +
-            `• *CBU:* \`${config.DATOS_PAGO.cbu}\`\n` +
-            `• *Titular:* ${config.DATOS_PAGO.titular}\n` +
-            `• *Banco:* ${config.DATOS_PAGO.banco}\n` +
-            `📸 *Compartir el comprobante de transferencia a este mismo número.*`;
 
         const confirmacion = 
             `🎉 *¡RESERVA CONFIRMADA!*\n\n` +
             `• 🎟️ *Número:* *${result.numero}*\n` +
             `• 👤 *Titular:* ${nombre}\n` +
             `• 🏠 *Domicilio:* ${domicilio}\n` +
-            `• 📱 *Teléfono:* ${telefonoFinal}\n` +
             `• 💰 *Valor:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')}\n\n` +
             `${medioPagoTexto}\n\n` +
-            `⚠️ *Importante:* Compartir el comprobante a este mismo número dentro de las *${config.HORAS_LIMITE_PAGO} hs* para confirmar tu jugada.\n\n` +
-            `👇 _(Abajo te enviamos el Alias para copiar directo)_\n\n` +
-            `👉 *¿Deseas elegir otro número?* Escribe *1* para reservar otro o *0* para volver al menú principal.`;
+            `👉 _Escribe 1 para reservar otro número o 0 para volver al menú._`;
 
         await sendReply(client, chatId, confirmacion);
         if (config.DATOS_PAGO.alias) {
@@ -776,13 +767,11 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
         if (titularWaId && titularWaId !== chatId) {
             const avisoTitular = 
                 `🎉 *¡RESERVA CONFIRMADA - ${config.EVENTO_NOMBRE}!*\n\n` +
-                `Hola *${nombre}*, te informamos que se reservó a tu nombre el número:\n` +
+                `Hola *${nombre}*, se reservó a tu nombre el número:\n` +
                 `• 🎟️ *Número:* *${result.numero}*\n` +
                 `• 🏠 *Domicilio:* ${domicilio}\n` +
                 `• 💰 *Valor:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')}\n\n` +
-                `${medioPagoTexto}\n\n` +
-                `⚠️ *Importante:* Compartir el comprobante a este mismo número dentro de las *${config.HORAS_LIMITE_PAGO} hs* para confirmar tu jugada.\n\n` +
-                `👇 _(Abajo te enviamos el Alias para copiar directo)_`;
+                `${medioPagoTexto}`;
             await sendReply(client, titularWaId, avisoTitular);
             if (config.DATOS_PAGO.alias) {
                 await sendReply(client, titularWaId, `${config.DATOS_PAGO.alias}`);
@@ -1141,14 +1130,11 @@ async function cmdMisNumeros(client, chatId, senderPhone) {
 
 async function cmdDatosPago(client, chatId) {
     const text = 
-        `💳 *DATOS DE PAGO / TRANSFERENCIA* 💳\n\n` +
-        `💰 *Valor por número:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')}\n` +
+        `💳 *DATOS DE PAGO* 💳\n\n` +
+        `💰 *Valor:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')} por número\n\n` +
+        `🏦 *Transferencia por Alias:*\n` +
         `• *Alias:* \`${config.DATOS_PAGO.alias}\`\n` +
-        `• *CBU:* \`${config.DATOS_PAGO.cbu}\`\n` +
-        `• *Titular:* ${config.DATOS_PAGO.titular}\n` +
-        `• *Banco:* ${config.DATOS_PAGO.banco}\n\n` +
-        `📸 *Por favor compartir el comprobante de transferencia a este mismo número.*\n\n` +
-        `👇 _(Abajo te enviamos el Alias en un mensaje separado para copiar en 1 toque)_:`;
+        `📸 Compartir el comprobante a este mismo número.`;
     await sendReply(client, chatId, text);
     if (config.DATOS_PAGO.alias) {
         await sendReply(client, chatId, `${config.DATOS_PAGO.alias}`);
