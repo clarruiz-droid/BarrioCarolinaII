@@ -1,6 +1,6 @@
-# 🎲 Bot de Quiniela Vecinal - Barrio Carolina II
+# 🎟️ Bot de Bono Contribución - Barrio Carolina II
 
-Bot interactivo de WhatsApp desarrollado en Node.js para gestionar la selección de números, control de reservas, seguimiento de pagos y recordatorios automáticos en eventos y quinielas comunitarias.
+Bot interactivo de WhatsApp desarrollado en Node.js para gestionar la selección de números, control de reservas, seguimiento de pagos y recordatorios automáticos para el **Bono Contribución para la construcción de la Sede Social**.
 
 ## 🚀 Funcionalidades
 
@@ -30,7 +30,7 @@ Bot interactivo de WhatsApp desarrollado en Node.js para gestionar la selección
 
 ## ⚙️ Configuración (.env)
 Copia `.env.example` a `.env` para personalizar:
-- `EVENTO_NOMBRE`: Nombre de la quiniela/evento.
+- `EVENTO_NOMBRE`: Nombre del bono contribución / evento.
 - `PRECIO_NUMERO`: Valor de cada tarjeta.
 - `PAGO_ALIAS`, `PAGO_CBU`, `PAGO_TITULAR`, `PAGO_BANCO`: Datos para transferencias.
 - `ADMIN_PHONES`: Números de teléfono autorizados para comandos de administración.

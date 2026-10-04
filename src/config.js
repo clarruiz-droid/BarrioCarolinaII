@@ -2,7 +2,7 @@ require('dotenv').config();
 
 module.exports = {
     // Nombre del evento
-    EVENTO_NOMBRE: process.env.EVENTO_NOMBRE || "Gran Quiniela Vecinal - Barrio Carolina II",
+    EVENTO_NOMBRE: process.env.EVENTO_NOMBRE || "BONO CONTRIBUCIÓN para la construcción de la Sede Social",
 
     // Rango de números (por defecto del 00 al 99)
     NUMERO_MIN: parseInt(process.env.NUMERO_MIN || "0", 10),
