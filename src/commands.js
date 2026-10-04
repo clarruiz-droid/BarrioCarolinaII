@@ -228,6 +228,7 @@ async function downloadMediaCustom(client, msg) {
         console.log('[Media Debug Info]:', JSON.stringify(debugInfo));
 
         const result = await client.pupPage.evaluate(async (msgId) => {
+            const steps = [];
             try {
                 const findMsg = async (idInput) => {
                     try {
@@ -259,7 +260,7 @@ async function downloadMediaCustom(client, msg) {
                 let msgObj = await findMsg(msgId);
 
                 if (!msgObj || !msgObj.mediaData) {
-                    return null;
+                    return { error: 'msgObj or mediaData is null' };
                 }
 
                 // Disparar descarga en segundo plano si aún no está listo
@@ -268,10 +269,11 @@ async function downloadMediaCustom(client, msg) {
                         if (typeof msgObj.downloadMedia === 'function') {
                             await msgObj.downloadMedia({ downloadEvenIfExpensive: true, rmrReason: 1 });
                         }
-                    } catch (e) {}
+                    } catch (e) {
+                        steps.push('triggerDownload error: ' + (e.message || e));
+                    }
                 }
 
-                // Esperar a que el estado se resuelva
                 let wait = 0;
                 while (msgObj.mediaData.mediaStage === 'FETCHING' && wait < 8) {
                     await new Promise(r => setTimeout(r, 400));
@@ -285,9 +287,8 @@ async function downloadMediaCustom(client, msg) {
                 const mediaKeyTimestamp = msgObj.mediaKeyTimestamp || msgObj.mediaData?.mediaKeyTimestamp;
                 const mediaType = msgObj.type || msgObj.mediaData?.type || 'image';
 
-                // Opción A: A través de WAWebDownloadManager con Proxy QPL seguro y campos combinados
+                // Opción A1: A través de WAWebDownloadManager sin downloadQpl
                 try {
-                    const mockQpl = new Proxy({}, { get: () => () => mockQpl });
                     const downloadManager = window.require('WAWebDownloadManager')?.downloadManager;
                     if (downloadManager && typeof downloadManager.downloadAndMaybeDecrypt === 'function') {
                         const decryptedMedia = await downloadManager.downloadAndMaybeDecrypt({
@@ -297,8 +298,7 @@ async function downloadMediaCustom(client, msg) {
                             mediaKey: mediaKey,
                             mediaKeyTimestamp: mediaKeyTimestamp,
                             type: mediaType,
-                            signal: new AbortController().signal,
-                            downloadQpl: mockQpl,
+                            signal: new AbortController().signal
                         });
 
                         if (decryptedMedia) {
@@ -312,8 +312,39 @@ async function downloadMediaCustom(client, msg) {
                             }
                         }
                     }
-                } catch (errDM) {
-                    // registrar error en objeto
+                } catch (errDM1) {
+                    steps.push('A1 err: ' + (errDM1.message || String(errDM1)));
+                }
+
+                // Opción A2: A través de WAWebDownloadManager con Proxy QPL
+                try {
+                    const mockQpl = new Proxy({}, { get: () => () => mockQpl });
+                    const downloadManager = window.require('WAWebDownloadManager')?.downloadManager;
+                    if (downloadManager && typeof downloadManager.downloadAndMaybeDecrypt === 'function') {
+                        const decryptedMedia = await downloadManager.downloadAndMaybeDecrypt({
+                            directPath: directPath,
+                            encFilehash: encFilehash,
+                            filehash: filehash,
+                            mediaKey: mediaKey,
+                            mediaKeyTimestamp: mediaKeyTimestamp,
+                            type: mediaType,
+                            signal: new AbortController().signal,
+                            downloadQpl: mockQpl
+                        });
+
+                        if (decryptedMedia) {
+                            const data = await window.WWebJS.arrayBufferToBase64Async(decryptedMedia);
+                            if (data && data.length > 500) {
+                                return {
+                                    data,
+                                    mimetype: msgObj.mimetype || msgObj.mediaData?.mimetype || 'image/jpeg',
+                                    filename: msgObj.filename || msgObj.mediaData?.filename || 'comprobante.jpg'
+                                };
+                            }
+                        }
+                    }
+                } catch (errDM2) {
+                    steps.push('A2 err: ' + (errDM2.message || String(errDM2)));
                 }
 
                 const hash = msgObj.filehash || msgObj.mediaData?.filehash;
@@ -337,7 +368,9 @@ async function downloadMediaCustom(client, msg) {
                             }
                         }
                     }
-                } catch (errCache) {}
+                } catch (errCache) {
+                    steps.push('B err: ' + (errCache.message || String(errCache)));
+                }
 
                 // Opción C: A través de WAWebMediaStorage (alta resolución)
                 try {
@@ -354,7 +387,9 @@ async function downloadMediaCustom(client, msg) {
                             };
                         }
                     }
-                } catch (errStorage) {}
+                } catch (errStorage) {
+                    steps.push('C err: ' + (errStorage.message || String(errStorage)));
+                }
 
                 // Opción D: A través de Blob en mediaData
                 try {
@@ -368,7 +403,9 @@ async function downloadMediaCustom(client, msg) {
                             filename: msgObj.filename || 'comprobante.jpg'
                         };
                     }
-                } catch (errBlob) {}
+                } catch (errBlob) {
+                    steps.push('D err: ' + (errBlob.message || String(errBlob)));
+                }
 
                 // Opción E: A través de renderableUrl si está cargado
                 try {
@@ -382,9 +419,11 @@ async function downloadMediaCustom(client, msg) {
                             filename: msgObj.filename || 'comprobante.jpg'
                         };
                     }
-                } catch (errUrl) {}
+                } catch (errUrl) {
+                    steps.push('E err: ' + (errUrl.message || String(errUrl)));
+                }
 
-                // Opción D: A través del preview thumbnail en base64 o buffer
+                // Opción F: A través del preview thumbnail
                 try {
                     if (msgObj.mediaData.preview) {
                         let prev = msgObj.mediaData.preview;
@@ -396,57 +435,24 @@ async function downloadMediaCustom(client, msg) {
                                 mimetype: 'image/jpeg',
                                 filename: 'comprobante.jpg'
                             };
-                        } else if (prev instanceof ArrayBuffer || prev?.buffer instanceof ArrayBuffer) {
-                            const buf = prev instanceof ArrayBuffer ? prev : prev.buffer;
-                            const data = await window.WWebJS.arrayBufferToBase64Async(buf);
-                            return {
-                                data,
-                                mimetype: 'image/jpeg',
-                                filename: 'comprobante.jpg'
-                            };
                         }
                     }
-                } catch (errPrev) {}
+                } catch (errPrev) {
+                    steps.push('F err: ' + (errPrev.message || String(errPrev)));
+                }
 
             } catch (errEval) {
-                console.error('Error dentro de evaluate media:', errEval);
+                steps.push('Global evaluate error: ' + (errEval.message || String(errEval)));
             }
 
-            // Opción F: Extractor directo del DOM buscando elementos <img> reales (sin miniaturas o gifs 1x1)
-            try {
-                const imgs = Array.from(document.querySelectorAll('img')).filter(img => 
-                    img.src && 
-                    (img.src.startsWith('blob:') || (img.src.startsWith('data:image') && !img.src.includes('image/gif') && img.src.length > 2000))
-                );
-                if (imgs.length > 0) {
-                    const lastImg = imgs[imgs.length - 1];
-                    if (lastImg.src.startsWith('data:image')) {
-                        const parts = lastImg.src.split(',');
-                        const mime = parts[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
-                        return {
-                            data: parts[1],
-                            mimetype: mime,
-                            filename: 'comprobante.jpg'
-                        };
-                    } else if (lastImg.src.startsWith('blob:')) {
-                        const resp = await fetch(lastImg.src);
-                        const buf = await resp.arrayBuffer();
-                        const data = await window.WWebJS.arrayBufferToBase64Async(buf);
-                        return {
-                            data,
-                            mimetype: 'image/jpeg',
-                            filename: 'comprobante.jpg'
-                        };
-                    }
-                }
-            } catch (eDOM) {}
-
-            return null;
+            return { failed: true, steps };
         }, serializedId);
 
         if (result && result.data) {
-            console.log('[Media] ✅ Archivo multimedia extraído exitosamente vía DOM / Blob.');
+            console.log('[Media] ✅ Archivo multimedia extraído exitosamente.');
             return result;
+        } else {
+            console.log('[Media Extract Steps Debug]:', JSON.stringify(result));
         }
     } catch (errCustom) {
         console.error('[Media Custom Extractor Error]:', errCustom.message || errCustom);
