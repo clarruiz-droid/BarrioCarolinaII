@@ -1011,9 +1011,9 @@ async function cmdInvitacion(client, chatId) {
         `📅 *Fecha de sorteo:* ${config.FECHA_SORTEO}\n` +
         `🎲 *Modalidad:* ${modalidadTexto}\n\n` +
         `👉 *¿Cómo elegir y reservar tu número?*\n` +
-        `Para ver los números disponibles y reservar el tuyo en 1 minuto, haz clic en el siguiente enlace y envíale la palabra *SORTEO* a nuestro asistente automático:\n\n` +
+        `Para ver los números disponibles y reservar el tuyo en 1 minuto, haz clic en el siguiente enlace y envíale la palabra *SORTEO* a nuestro asistente virtual:\n\n` +
         `📲 *Haz clic aquí para reservar:* ${waLink}\n\n` +
-        `_(El Bot te atenderá por chat privado al instante)_ 🍀`;
+        `_(El Asistente te atenderá por chat privado al instante)_ 🍀`;
 
     await sendReply(client, chatId, texto);
 }
