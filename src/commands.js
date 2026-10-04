@@ -1005,7 +1005,7 @@ async function cmdInvitacion(client, chatId) {
 
     const texto = 
         `🎲 *¡${config.EVENTO_NOMBRE.toUpperCase()}!* 🎲\n\n` +
-        `Vecinos/as, ya están habilitados los números para participar del sorteo pro-mejoras del barrio.\n\n` +
+        `Vecinos/as, ya están habilitados los números para participar del sorteo para la construcción de la Sede Social.\n\n` +
         `🎁 *Premios:*\n${premiosTexto}\n\n` +
         `💰 *Valor:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')} por número\n` +
         `📅 *Fecha de sorteo:* ${config.FECHA_SORTEO}\n` +
