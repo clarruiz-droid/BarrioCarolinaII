@@ -2,6 +2,7 @@ const config = require('./config');
 const db = require('./db');
 const scheduler = require('./scheduler');
 const mp = require('./mercadopago');
+const gemini = require('./gemini');
 
 // Almacenamiento en memoria de las sesiones y pasos de cada usuario
 const userSessions = {};
@@ -110,9 +111,225 @@ async function sendReply(client, chatId, text) {
     }
 }
 
+/**
+ * Notifica a los administradores (grupo de admins o teléfonos directos)
+ */
+async function notifyAdmins(client, text) {
+    try {
+        if (config.ADMIN_GRUPO_ID) {
+            await sendReply(client, config.ADMIN_GRUPO_ID, text);
+        } else if (config.ADMIN_PHONES && config.ADMIN_PHONES.length > 0) {
+            for (const admin of config.ADMIN_PHONES) {
+                const adminWaId = formatWhatsAppId(admin);
+                if (adminWaId) {
+                    await sendReply(client, adminWaId, text);
+                }
+            }
+        }
+    } catch (e) {
+        console.error('[Error notificando a administradores]:', e.message);
+    }
+}
+
+/**
+ * Procesa y valida automáticamente comprobantes de pago enviados por imágenes o PDF
+ */
+async function handleReceiptMedia(msg, client, chatId, senderPhone, isUserAdmin) {
+    try {
+        const media = await msg.downloadMedia();
+        if (!media || !media.data) {
+            return false;
+        }
+
+        const isImageOrPdf = media.mimetype && (
+            media.mimetype.startsWith('image/') || 
+            media.mimetype === 'application/pdf'
+        );
+
+        if (!isImageOrPdf) {
+            return false;
+        }
+
+        // Si Gemini no está configurado, avisar y derivar a admin
+        if (!gemini.isGeminiConfigured()) {
+            await sendReply(
+                client, 
+                chatId, 
+                `📥 *Comprobante recibido.*\n\nUn administrador revisará la imagen para confirmar tu número a la brevedad.`
+            );
+            await notifyAdmins(
+                client, 
+                `📥 *[NUEVO COMPROBANTE RECIBIDO]*\n\n` +
+                `📱 *Remitente:* ${senderPhone}\n` +
+                `⚠️ _La API de Gemini no está configurada (.env), requiere verificación manual._`
+            );
+            return true;
+        }
+
+        // Mensaje de feedback inmediato
+        await sendReply(client, chatId, `⏳ *Analizando tu comprobante de pago con Inteligencia Artificial...*`);
+
+        const analysis = await gemini.analyzeReceipt(media.data, media.mimetype);
+
+        if (!analysis.success || !analysis.data) {
+            await sendReply(
+                client, 
+                chatId, 
+                `⚠️ No pudimos procesar automáticamente el comprobante.\n` +
+                `No te preocupes, ya dimos aviso a los administradores para que lo verifiquen manualmente.`
+            );
+            await notifyAdmins(
+                client, 
+                `⚠️ *[COMPROBANTE NO LEÍDO]*\n\n` +
+                `📱 *Remitente:* ${senderPhone}\n` +
+                `❌ *Detalle:* ${analysis.error || 'Error al procesar'}\n` +
+                `💡 Por favor verificar la imagen enviada por el vecino.`
+            );
+            return true;
+        }
+
+        const data = analysis.data;
+
+        // Si la IA detecta que la imagen NO es un comprobante
+        if (!data.es_comprobante) {
+            await sendReply(
+                client, 
+                chatId, 
+                `ℹ️ La imagen enviada no parece ser un comprobante de transferencia bancaria.\n\n` +
+                `Si realizaste una transferencia, por favor envía una foto o captura clara donde figure el monto y la fecha.`
+            );
+            return true;
+        }
+
+        // 1. Anti-Fraude: Comprobante ya utilizado
+        if (data.numero_operacion && db.isReceiptProcessed(data.numero_operacion)) {
+            await sendReply(
+                client, 
+                chatId, 
+                `⚠️ *Atención:* Este comprobante (Op. N° *${data.numero_operacion}*) ya fue registrado y procesado anteriormente.\n\n` +
+                `Si crees que es un error, por favor comunícate con la comisión.`
+            );
+            await notifyAdmins(
+                client, 
+                `🚨 *[ALERTA: COMPROBANTE REUTILIZADO]*\n\n` +
+                `📱 *Remitente:* ${senderPhone}\n` +
+                `🧾 *N° Operación:* ${data.numero_operacion}\n` +
+                `💰 *Monto:* $${(data.monto || 0).toLocaleString('es-AR')}\n` +
+                `⚠️ Se intentó ingresar un comprobante que ya figura acreditado.`
+            );
+            return true;
+        }
+
+        // 2. Buscar reservas pendientes del comprador
+        const userNums = db.getUserNumbers(senderPhone);
+        const pendingNums = userNums.filter(n => n.estado === 'RESERVADO');
+
+        const montoDetectado = Number(data.monto) || 0;
+        const deudaTotal = pendingNums.length * config.PRECIO_NUMERO;
+
+        // Validar si el monto cubre la deuda y la auto-aprobación está activa
+        if (pendingNums.length > 0 && montoDetectado >= deudaTotal && deudaTotal > 0 && config.AUTO_APROBAR_COMPROBANTES) {
+            const vecNombre = pendingNums[0].vecino || 'Vecino';
+            const vecCasa = pendingNums[0].casa || '-';
+            const numerosConfirmados = [];
+
+            for (const item of pendingNums) {
+                const res = db.confirmPayment(item.numero, 'AUTO_GEMINI_AI');
+                if (res.success) {
+                    numerosConfirmados.push(res.numero);
+                }
+            }
+
+            const opId = data.numero_operacion || `AI_${Date.now()}`;
+            db.registerReceipt(opId, {
+                telefono: senderPhone,
+                vecino: vecNombre,
+                casa: vecCasa,
+                monto: montoDetectado,
+                numeros: numerosConfirmados,
+                banco: data.banco_origen || 'No especificado',
+                fechaComprobante: data.fecha_hora || '-',
+                emisor: data.emisor_nombre || '-'
+            });
+
+            const numerosStr = numerosConfirmados.map(n => `*${n}*`).join(', ');
+
+            // Confirmación directa al comprador
+            await sendReply(
+                client, 
+                chatId, 
+                `🎉 *¡PAGO VERIFICADO Y CONFIRMADO!* 🎉\n\n` +
+                `Hola *${vecNombre}*, tu comprobante por *$${montoDetectado.toLocaleString('es-AR')}* fue validado con éxito.\n\n` +
+                `🎟️ *Tus números confirmados:* ${numerosStr}\n` +
+                `🏦 *Origen:* ${data.banco_origen || 'Transferencia'}\n` +
+                `🧾 *N° Operación:* \`${opId}\`\n\n` +
+                `¡Muchas gracias por apoyar al Barrio Carolina II y mucha suerte en el sorteo! 🍀`
+            );
+
+            // Notificación al grupo de administradores
+            await notifyAdmins(
+                client, 
+                `🤖 *[PAGO AUTO-CONFIRMADO POR IA]* 🤖\n\n` +
+                `👤 *Titular:* ${vecNombre} (${vecCasa})\n` +
+                `📱 *Celular:* ${senderPhone}\n` +
+                `🎟️ *Números Pagados:* ${numerosStr}\n` +
+                `💰 *Monto:* $${montoDetectado.toLocaleString('es-AR')}\n` +
+                `🏦 *Entidad:* ${data.banco_origen || 'Transferencia'}\n` +
+                `🧾 *N° Operación:* \`${opId}\`\n` +
+                `📅 *Fecha:* ${data.fecha_hora || '-'}`
+            );
+            return true;
+        }
+
+        // Si no se pudo auto-aprobar (monto parcial, sin reservas o auto-aprobación desactivada)
+        let motivo = '';
+        if (pendingNums.length === 0) {
+            motivo = 'No se encontraron números reservados a nombre de este teléfono.';
+        } else if (montoDetectado < deudaTotal) {
+            motivo = `El monto ($${montoDetectado.toLocaleString('es-AR')}) no cubre el total de tus reservas ($${deudaTotal.toLocaleString('es-AR')}).`;
+        } else {
+            motivo = 'Derivado para confirmación de los administradores.';
+        }
+
+        await sendReply(
+            client, 
+            chatId, 
+            `📋 *Comprobante recibido por $${montoDetectado.toLocaleString('es-AR')}*.\n\n` +
+            `ℹ️ *Estado:* En revisión.\n` +
+            `Motivo: ${motivo}\n\n` +
+            `Los administradores verificarán los datos y confirmarán tu jugada a la brevedad.`
+        );
+
+        let detallePendientes = '';
+        if (pendingNums.length > 0) {
+            detallePendientes = `\n🎟️ *Números pendientes:* ${pendingNums.map(n => n.numero).join(', ')}\n` +
+                                `💡 *Para aprobar:* \`!pagado ${pendingNums.map(n => n.numero).join(' ')}\``;
+        }
+
+        await notifyAdmins(
+            client, 
+            `⚠️ *[COMPROBANTE PARA REVISIÓN MANUAL]* ⚠️\n\n` +
+            `📱 *Remitente:* ${senderPhone}\n` +
+            `💰 *Monto detectado:* $${montoDetectado.toLocaleString('es-AR')}\n` +
+            `🏦 *Entidad:* ${data.banco_origen || '-'}\n` +
+            `👤 *Emisor:* ${data.emisor_nombre || '-'}\n` +
+            `🎯 *Destinatario:* ${data.destinatario_nombre || '-'}\n` +
+            `🧾 *N° Operación:* \`${data.numero_operacion || '-'}\`\n` +
+            `📅 *Fecha:* ${data.fecha_hora || '-'}\n` +
+            `ℹ️ *Resumen IA:* ${data.resumen_lectura || '-'}${detallePendientes}`
+        );
+
+        return true;
+    } catch (err) {
+        console.error('[Error en handleReceiptMedia]:', err);
+        return false;
+    }
+}
+
 async function handleMessage(msg, client) {
     const rawBody = (msg.body || '').trim();
-    if (!rawBody) return;
+    const hasMedia = Boolean(msg.hasMedia);
+    if (!rawBody && !hasMedia) return;
 
     // Si el mensaje fue enviado por la propia cuenta del bot:
     // Solo lo procesamos si NO es una respuesta generada por el bot (para evitar bucles)
@@ -128,6 +345,14 @@ async function handleMessage(msg, client) {
     const senderPhone = senderChatId.replace(/@.*/, '');
     const session = getSession(senderChatId);
     const isUserAdmin = Boolean(msg.fromMe || isAdmin(senderPhone, msg));
+
+    // Si el mensaje incluye archivo multimedia (imagen o PDF de comprobante) en chat privado
+    if (hasMedia && !isGroup) {
+        const mediaHandled = await handleReceiptMedia(msg, client, senderChatId, senderPhone, isUserAdmin);
+        if (mediaHandled) {
+            return;
+        }
+    }
 
     const normalizedBody = rawBody.toUpperCase();
 

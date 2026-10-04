@@ -70,7 +70,7 @@ webhook.startWebhookServer(client, config.PORT);
 
 // Evento: Mensajes recibidos
 client.on('message_create', async (msg) => {
-    if (msg.body) {
+    if (msg.body || msg.hasMedia) {
         try {
             await commands.handleMessage(msg, client);
         } catch (err) {

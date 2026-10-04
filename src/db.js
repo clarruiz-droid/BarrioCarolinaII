@@ -68,6 +68,11 @@ function syncAndCleanDatabase(data) {
         modified = true;
     }
 
+    if (!data.comprobantes) {
+        data.comprobantes = {};
+        modified = true;
+    }
+
     data.numeros = cleanNumeros;
     data.precioPorNumero = config.PRECIO_NUMERO;
     data.evento = config.EVENTO_NOMBRE;
@@ -88,7 +93,8 @@ function initDatabase() {
             creadoEl: new Date().toISOString(),
             evento: config.EVENTO_NOMBRE,
             precioPorNumero: config.PRECIO_NUMERO,
-            numeros: {}
+            numeros: {},
+            comprobantes: {}
         };
         saveRawData(syncAndCleanDatabase(initialData));
         console.log(`[DB] Base de datos creada con números del ${padNumber(config.NUMERO_MIN)} al ${padNumber(config.NUMERO_MAX)}`);
@@ -367,6 +373,37 @@ function getSummary() {
     };
 }
 
+/**
+ * Verifica si un número de operación de comprobante ya fue registrado previamente
+ */
+function isReceiptProcessed(operationId) {
+    if (!operationId) return false;
+    const cleanId = String(operationId).trim().toUpperCase();
+    if (!cleanId) return false;
+    const db = readRawData();
+    return Boolean(db.comprobantes && db.comprobantes[cleanId]);
+}
+
+/**
+ * Registra un comprobante procesado para evitar reutilización
+ */
+function registerReceipt(operationId, details = {}) {
+    if (!operationId) return false;
+    const cleanId = String(operationId).trim().toUpperCase();
+    if (!cleanId) return false;
+
+    const db = readRawData();
+    if (!db.comprobantes) db.comprobantes = {};
+
+    db.comprobantes[cleanId] = {
+        fechaProcesado: new Date().toISOString(),
+        ...details
+    };
+
+    saveRawData(db);
+    return true;
+}
+
 module.exports = {
     initDatabase,
     readRawData,
@@ -379,5 +416,8 @@ module.exports = {
     getUserNumbers,
     getPendingPayments,
     getPaidNumbers,
-    getSummary
+    getSummary,
+    isReceiptProcessed,
+    registerReceipt
 };
+
