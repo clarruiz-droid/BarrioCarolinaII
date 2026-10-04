@@ -186,6 +186,26 @@ async function downloadMediaCustom(client, msg) {
         const msgId = msg.id._serialized;
 
         console.log('[Media] Intentando extracción directa desde Puppeteer DOM...');
+        const debugInfo = await client.pupPage.evaluate((msgId) => {
+            try {
+                const m = window.require('WAWebCollections').Msg.get(msgId);
+                if (!m) return { found: false };
+                return {
+                    found: true,
+                    type: m.type,
+                    mimetype: m.mimetype,
+                    mediaStage: m.mediaData?.mediaStage,
+                    hasMediaBlob: Boolean(m.mediaData?.mediaBlob),
+                    hasPreview: Boolean(m.mediaData?.preview),
+                    previewType: typeof m.mediaData?.preview,
+                    directPath: m.directPath,
+                    mediaDataKeys: Object.keys(m.mediaData || {})
+                };
+            } catch (e) {
+                return { error: e.message || String(e) };
+            }
+        }, msgId);
+        console.log('[Media Debug Info]:', JSON.stringify(debugInfo));
         const result = await client.pupPage.evaluate(async (msgId) => {
             try {
                 const getMsg = () => {
