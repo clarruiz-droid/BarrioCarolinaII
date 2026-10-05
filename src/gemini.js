@@ -8,6 +8,58 @@ function isGeminiConfigured() {
     return Boolean(config.GEMINI_API_KEY && config.GEMINI_API_KEY.trim() !== '');
 }
 
+let cachedModels = null;
+let lastModelCheck = 0;
+
+/**
+ * Consulta dinámicamente la lista de modelos válidos que soportan 'generateContent'
+ * para la API Key actual, evitando nombres erróneos o modelos inexistentes (404)
+ */
+async function getSupportedModels(apiKey) {
+    const now = Date.now();
+    if (cachedModels && cachedModels.length > 0 && (now - lastModelCheck < 1800000)) {
+        return cachedModels;
+    }
+
+    try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
+        const resp = await fetch(url);
+        if (resp.ok) {
+            const data = await resp.json();
+            if (data && Array.isArray(data.models)) {
+                const available = data.models
+                    .filter(m => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
+                    .map(m => m.name.replace(/^models\//, ''));
+
+                if (available.length > 0) {
+                    // Priorizar gemini-3.8-flash y modelos flash más nuevos
+                    available.sort((a, b) => {
+                        if (a === 'gemini-3.8-flash') return -1;
+                        if (b === 'gemini-3.8-flash') return 1;
+                        if (a.includes('3.8') && !b.includes('3.8')) return -1;
+                        if (!a.includes('3.8') && b.includes('3.8')) return 1;
+                        if (a.includes('flash') && !b.includes('flash')) return -1;
+                        if (!a.includes('flash') && b.includes('flash')) return 1;
+                        return 0;
+                    });
+
+                    console.log(`[Gemini] Modelos activos detectados para tu clave: ${available.slice(0, 5).join(', ')}`);
+                    cachedModels = available;
+                    lastModelCheck = now;
+                    return cachedModels;
+                }
+            }
+        } else {
+            console.log(`[Gemini] ListModels respondió con HTTP ${resp.status}`);
+        }
+    } catch (e) {
+        console.error('[Gemini] No se pudo consultar ListModels:', e.message);
+    }
+
+    // Modelo seguro por defecto recomendado oficialmente por Google
+    return ['gemini-3.8-flash'];
+}
+
 /**
  * Analiza una imagen o documento de comprobante de pago utilizando Gemini AI
  * @param {string} base64Data - Contenido en base64 de la imagen o archivo
@@ -23,11 +75,7 @@ async function analyzeReceipt(base64Data, mimeType = 'image/jpeg') {
         };
     }
 
-    const candidateModels = [
-        'gemini-3.8-flash',
-        'gemini-3.8-flash-lite',
-        'gemini-3.8-flash-preview'
-    ];
+    const candidateModels = await getSupportedModels(config.GEMINI_API_KEY);
 
     const prompt = `Analiza este comprobante de transferencia o pago bancario/billetera virtual (ej: Mercado Pago, Cuenta DNI, BNA+, Ualá, Banco Galicia, Santander, BBVA, Macro, Brubank, Naranja X, etc.) y extrae los datos con la máxima fidelidad posible.
 
