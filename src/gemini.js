@@ -31,20 +31,21 @@ async function getSupportedModels(apiKey) {
                     .filter(m => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
                     .map(m => m.name.replace(/^models\//, ''));
 
-                if (available.length > 0) {
-                    // Priorizar gemini-3.8-flash y modelos flash más nuevos
-                    available.sort((a, b) => {
-                        if (a === 'gemini-3.8-flash') return -1;
-                        if (b === 'gemini-3.8-flash') return 1;
-                        if (a.includes('3.8') && !b.includes('3.8')) return -1;
-                        if (!a.includes('3.8') && b.includes('3.8')) return 1;
-                        if (a.includes('flash') && !b.includes('flash')) return -1;
-                        if (!a.includes('flash') && b.includes('flash')) return 1;
-                        return 0;
-                    });
+                // Modelos prioritarios comprobados en cuentas Google AI
+                const preferredModels = [
+                    'gemini-3.8-flash',
+                    'gemini-3.7-flash',
+                    'gemini-3.5-flash',
+                    'gemini-2.5-flash',
+                    'gemini-flash-latest'
+                ];
 
-                    console.log(`[Gemini] Modelos activos detectados para tu clave: ${available.slice(0, 5).join(', ')}`);
-                    cachedModels = available;
+                // Filtrar solo los modelos prioritarios que estén activos en la cuenta
+                const matched = preferredModels.filter(m => available.includes(m));
+
+                if (matched.length > 0) {
+                    console.log(`[Gemini] ✅ Modelos activos seleccionados para tu cuenta: ${matched.join(', ')}`);
+                    cachedModels = matched;
                     lastModelCheck = now;
                     return cachedModels;
                 }
@@ -56,8 +57,8 @@ async function getSupportedModels(apiKey) {
         console.error('[Gemini] No se pudo consultar ListModels:', e.message);
     }
 
-    // Modelo seguro por defecto recomendado oficialmente por Google
-    return ['gemini-3.8-flash'];
+    // Modelos seguros por defecto confirmados en tu cuenta
+    return ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-2.5-flash'];
 }
 
 /**
@@ -158,7 +159,7 @@ Devuelve estrictamente un objeto JSON con la siguiente estructura:
                 data: parsed
             };
         } catch (err) {
-            console.log(`[Gemini] Modelo ${modelName} no disponible:`, err.message || err);
+            console.error(`[Gemini Error en ${modelName}]:`, err.message || err);
             lastError = err;
         }
     }

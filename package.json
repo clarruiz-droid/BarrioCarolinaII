@@ -1,6 +1,6 @@
 {
   "name": "bot-quiniela-carolina-ii",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Bot de WhatsApp para gestión del Bono Contribución para la construcción de la Sede Social - Barrio Carolina II",
   "main": "src/index.js",
   "scripts": {
