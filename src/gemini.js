@@ -31,13 +31,13 @@ async function getSupportedModels(apiKey) {
                     .filter(m => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
                     .map(m => m.name.replace(/^models\//, ''));
 
-                // Modelos prioritarios comprobados en cuentas Google AI
+                // Modelos prioritarios comprobados en cuentas Google AI (gemini-3.5-flash primero)
                 const preferredModels = [
-                    'gemini-3.8-flash',
-                    'gemini-3.7-flash',
                     'gemini-3.5-flash',
                     'gemini-2.5-flash',
-                    'gemini-flash-latest'
+                    'gemini-flash-latest',
+                    'gemini-3.7-flash',
+                    'gemini-3.8-flash'
                 ];
 
                 // Filtrar solo los modelos prioritarios que estén activos en la cuenta
@@ -57,8 +57,8 @@ async function getSupportedModels(apiKey) {
         console.error('[Gemini] No se pudo consultar ListModels:', e.message);
     }
 
-    // Modelos seguros por defecto confirmados en tu cuenta
-    return ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-2.5-flash'];
+    // Modelos seguros por defecto confirmados en tu cuenta (gemini-3.5-flash primero)
+    return ['gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-flash-latest'];
 }
 
 /**
@@ -128,17 +128,22 @@ Devuelve estrictamente un objeto JSON con la siguiente estructura:
                     success = true;
                 } catch (apiErr) {
                     const errStr = (apiErr.message || String(apiErr)).toLowerCase();
+
+                    // Si se agotó la cuota diaria o por minuto (429 / quota exceeded), no esperar en vano, pasar al siguiente modelo
+                    if (errStr.includes('429') || errStr.includes('quota') || errStr.includes('resource_exhausted')) {
+                        console.log(`[Gemini] Cuota alcanzada en ${modelName}, cambiando inmediatamente al siguiente modelo...`);
+                        throw apiErr;
+                    }
+
                     const isTransient = errStr.includes('503') || 
                                       errStr.includes('high demand') || 
                                       errStr.includes('overloaded') || 
-                                      errStr.includes('429') || 
-                                      errStr.includes('resource_exhausted') || 
                                       errStr.includes('fetch failed') ||
                                       errStr.includes('econnreset');
 
                     if (isTransient && attempt < maxAttempts - 1) {
                         attempt++;
-                        const delayMs = 1500 * attempt + Math.floor(Math.random() * 800);
+                        const delayMs = 1500 * attempt + Math.floor(Math.random() * 500);
                         console.log(`[Gemini] Reintento ${attempt}/${maxAttempts} en ${delayMs}ms por alta demanda en ${modelName}...`);
                         await new Promise(r => setTimeout(r, delayMs));
                     } else {
