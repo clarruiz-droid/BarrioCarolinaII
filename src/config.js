@@ -43,7 +43,8 @@ module.exports = {
     // Token de acceso de Mercado Pago para generación automática de links de pago
     MP_ACCESS_TOKEN: process.env.MP_ACCESS_TOKEN || "",
 
-    // Configuración de Gemini AI para análisis automático de comprobantes
+    // Configuración de Inteligencia Artificial (Groq / Gemini) para análisis automático de comprobantes
+    GROQ_API_KEY: (process.env.GROQ_API_KEY || "").trim().replace(/^["']|["']$/g, ''),
     GEMINI_API_KEY: (process.env.GEMINI_API_KEY || "").trim().replace(/^["']|["']$/g, ''),
     AUTO_APROBAR_COMPROBANTES: process.env.AUTO_APROBAR_COMPROBANTES !== "false",
 
