@@ -31,13 +31,13 @@ async function getSupportedModels(apiKey) {
                     .filter(m => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
                     .map(m => m.name.replace(/^models\//, ''));
 
-                // Modelos prioritarios comprobados en cuentas Google AI (gemini-3.5-flash primero)
+                // Modelos prioritarios estables con alta cuota gratuita (hasta 1.500 req/día)
                 const preferredModels = [
-                    'gemini-3.5-flash',
-                    'gemini-2.5-flash',
+                    'gemini-1.5-flash',
+                    'gemini-2.0-flash',
+                    'gemini-1.5-flash-8b',
                     'gemini-flash-latest',
-                    'gemini-3.7-flash',
-                    'gemini-3.8-flash'
+                    'gemini-2.5-flash'
                 ];
 
                 // Filtrar solo los modelos prioritarios que estén activos en la cuenta
@@ -57,8 +57,8 @@ async function getSupportedModels(apiKey) {
         console.error('[Gemini] No se pudo consultar ListModels:', e.message);
     }
 
-    // Modelos seguros por defecto confirmados en tu cuenta (gemini-3.5-flash primero)
-    return ['gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-flash-latest'];
+    // Modelos seguros por defecto con alta cuota gratuita (gemini-1.5-flash primero)
+    return ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash-8b', 'gemini-flash-latest'];
 }
 
 /**
