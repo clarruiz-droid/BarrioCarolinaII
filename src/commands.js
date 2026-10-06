@@ -3,6 +3,7 @@ const db = require('./db');
 const scheduler = require('./scheduler');
 const mp = require('./mercadopago');
 const gemini = require('./gemini');
+const pdf = require('./pdf');
 
 // Almacenamiento en memoria de las sesiones y pasos de cada usuario
 const userSessions = {};
@@ -542,7 +543,7 @@ async function handleReceiptMedia(msg, client, chatId, senderPhone, isUserAdmin)
             return false;
         }
 
-        // Si Gemini no está configurado, avisar y derivar a admin
+        // Si la IA no está configurada, avisar y derivar a admin
         if (!gemini.isGeminiConfigured()) {
             await sendReply(
                 client, 
@@ -553,7 +554,7 @@ async function handleReceiptMedia(msg, client, chatId, senderPhone, isUserAdmin)
                 client, 
                 `📥 *[NUEVO COMPROBANTE RECIBIDO]*\n\n` +
                 `📱 *Remitente:* ${senderPhone}\n` +
-                `⚠️ _La API de Gemini no está configurada (.env), requiere verificación manual._`
+                `⚠️ _La API de IA no está configurada (.env), requiere verificación manual._`
             );
             return true;
         }
@@ -561,9 +562,25 @@ async function handleReceiptMedia(msg, client, chatId, senderPhone, isUserAdmin)
         // Mensaje de feedback inmediato
         await sendReply(client, chatId, `⏳ *Analizando tu comprobante de pago con Inteligencia Artificial...*`);
 
-        const kbSize = Math.round((media.data?.length || 0) * 0.75 / 1024);
-        console.log(`[Gemini] Enviando imagen a analizar (${kbSize} KB, mimetype: ${media.mimetype})...`);
-        const analysis = await gemini.analyzeReceipt(media.data, media.mimetype);
+        let dataToAnalyze = media.data;
+        let mimeToAnalyze = media.mimetype;
+
+        // Si es un documento PDF, convertir la primera página a imagen para procesarla con visión
+        if (media.mimetype && media.mimetype.includes('pdf')) {
+            console.log(`[Media] Detectado documento PDF de ${senderPhone}. Convirtiendo a imagen con Puppeteer...`);
+            const converted = await pdf.convertPdfToImage(client, media.data);
+            if (converted && converted.base64) {
+                dataToAnalyze = converted.base64;
+                mimeToAnalyze = converted.mimeType;
+                console.log(`[Media] ✅ PDF convertido con éxito a imagen JPEG.`);
+            } else {
+                console.warn(`[Media] ⚠️ No se pudo convertir el PDF a imagen. Se intentará análisis directo.`);
+            }
+        }
+
+        const kbSize = Math.round((dataToAnalyze?.length || 0) * 0.75 / 1024);
+        console.log(`[IA] Enviando archivo a analizar (${kbSize} KB, mimetype: ${mimeToAnalyze})...`);
+        const analysis = await gemini.analyzeReceipt(dataToAnalyze, mimeToAnalyze);
 
         if (!analysis.success || !analysis.data) {
             await sendReply(
