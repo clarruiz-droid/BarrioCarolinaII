@@ -48,6 +48,8 @@ async function analyzeReceiptGroq(base64Data, mimeType = 'image/jpeg') {
     }
 
     const groqModels = [
+        'qwen/qwen3.8-27b',
+        'qwen3.8-27b',
         'llama-3.2-11b-vision-preview',
         'llama-3.2-90b-vision-preview'
     ];
