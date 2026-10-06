@@ -36,7 +36,8 @@ function syncAndCleanDatabase(data) {
             telefono: null,
             fechaReserva: null,
             fechaPago: null,
-            confirmadoPor: null
+            confirmadoPor: null,
+            pagadorBancario: null
         };
     }
 
@@ -202,7 +203,7 @@ function reserveNumber(numInput, vecino, casa, telefono) {
 /**
  * Confirma el pago de un número
  */
-function confirmPayment(numInput, adminPhone, vecinoDirecto = null, casaDirecta = null, telefonoDirecto = null) {
+function confirmPayment(numInput, adminPhone, vecinoDirecto = null, casaDirecta = null, telefonoDirecto = null, pagadorBancario = null) {
     const numStr = normalizeNumber(numInput);
     if (!numStr) {
         return { success: false, error: 'NUMERO_INVALIDO', message: `Número inválido. Debe ser entre ${padNumber(config.NUMERO_MIN)} y ${padNumber(config.NUMERO_MAX)}.` };
@@ -238,6 +239,9 @@ function confirmPayment(numInput, adminPhone, vecinoDirecto = null, casaDirecta 
     item.estado = 'PAGADO';
     item.fechaPago = new Date().toISOString();
     item.confirmadoPor = adminPhone;
+    if (pagadorBancario) {
+        item.pagadorBancario = pagadorBancario.trim();
+    }
 
     saveRawData(db);
 
@@ -274,6 +278,7 @@ function releaseNumber(numInput) {
     item.fechaReserva = null;
     item.fechaPago = null;
     item.confirmadoPor = null;
+    item.pagadorBancario = null;
 
     saveRawData(db);
 

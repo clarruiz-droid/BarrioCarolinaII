@@ -664,8 +664,12 @@ async function handleReceiptMedia(msg, client, chatId, senderPhone, isUserAdmin)
             const vecCasa = pendingNums[0].casa || '-';
             const numerosConfirmados = [];
 
+            // Detectar si el emisor de la transferencia es un tercero diferente al titular de la reserva
+            const emisorBancario = data.emisor_nombre && data.emisor_nombre.trim().length >= 3 ? data.emisor_nombre.trim() : null;
+            const esTercero = Boolean(emisorBancario && !isFlexibleNameMatch(pendingNums[0].vecino, emisorBancario));
+
             for (const item of pendingNums) {
-                const res = db.confirmPayment(item.numero, 'AUTO_GEMINI_AI');
+                const res = db.confirmPayment(item.numero, 'AUTO_AI', null, null, null, esTercero ? emisorBancario : null);
                 if (res.success) {
                     numerosConfirmados.push(res.numero);
                 }
@@ -680,35 +684,55 @@ async function handleReceiptMedia(msg, client, chatId, senderPhone, isUserAdmin)
                 numeros: numerosConfirmados,
                 banco: data.banco_origen || 'No especificado',
                 fechaComprobante: data.fecha_hora || '-',
-                emisor: data.emisor_nombre || '-'
+                emisor: emisorBancario || '-',
+                esTercero: esTercero
             });
 
             const numerosStr = numerosConfirmados.map(n => `*${n}*`).join(', ');
 
-            // Confirmación directa al comprador
-            await sendReply(
-                client, 
-                chatId, 
-                `🎉 *¡PAGO VERIFICADO Y CONFIRMADO!* 🎉\n\n` +
+            // Confirmación directa al comprador / vecino
+            let msgVecino = `🎉 *¡PAGO VERIFICADO Y CONFIRMADO!* 🎉\n\n` +
                 `Hola *${vecNombre}*, tu comprobante por *$${montoDetectado.toLocaleString('es-AR')}* fue validado con éxito.\n\n` +
-                `🎟️ *Tus números confirmados:* ${numerosStr}\n` +
-                `🏦 *Origen:* ${data.banco_origen || 'Transferencia'}\n` +
-                `🧾 *N° Operación:* \`${opId}\`\n\n` +
-                `¡Muchas gracias por apoyar al Barrio Carolina II y mucha suerte en el sorteo! 🍀`
-            );
+                `• 🎟️ *Tus números confirmados:* ${numerosStr}\n`;
+
+            if (esTercero) {
+                msgVecino += `• 👤 *Titular de la jugada:* ${vecNombre} (${vecCasa})\n` +
+                             `• 💳 *Comprobante emitido por:* ${emisorBancario}\n`;
+            }
+
+            msgVecino += `• 🏦 *Origen:* ${data.banco_origen || 'Transferencia'}\n` +
+                         `• 🧾 *N° Operación:* \`${opId}\`\n\n` +
+                         `¡Muchas gracias por apoyar al Barrio Carolina II y mucha suerte en el sorteo! 🍀`;
+
+            await sendReply(client, chatId, msgVecino);
 
             // Notificación al grupo de administradores
-            await notifyAdmins(
-                client, 
-                `🤖 *[PAGO AUTO-CONFIRMADO POR IA]* 🤖\n\n` +
-                `👤 *Titular:* ${vecNombre} (${vecCasa})\n` +
-                `📱 *Celular:* ${senderPhone}\n` +
-                `🎟️ *Números Pagados:* ${numerosStr}\n` +
-                `💰 *Monto:* $${montoDetectado.toLocaleString('es-AR')}\n` +
-                `🏦 *Entidad:* ${data.banco_origen || 'Transferencia'}\n` +
-                `🧾 *N° Operación:* \`${opId}\`\n` +
-                `📅 *Fecha:* ${data.fecha_hora || '-'}`
-            );
+            if (esTercero) {
+                await notifyAdmins(
+                    client, 
+                    `🟡 *[PAGO CONFIRMADO - CUENTA DE TERCERO]* 🟡\n\n` +
+                    `👤 *Titular de la reserva:* ${vecNombre} (${vecCasa})\n` +
+                    `💳 *Emisor bancario:* *${emisorBancario}* ⚠️ (Tercero)\n` +
+                    `📱 *WhatsApp remitente:* ${senderPhone}\n` +
+                    `🎟️ *Números Pagados:* ${numerosStr}\n` +
+                    `💰 *Monto:* $${montoDetectado.toLocaleString('es-AR')}\n` +
+                    `🏦 *Entidad:* ${data.banco_origen || 'Transferencia'}\n` +
+                    `🧾 *N° Operación:* \`${opId}\`\n` +
+                    `📅 *Fecha:* ${data.fecha_hora || '-'}`
+                );
+            } else {
+                await notifyAdmins(
+                    client, 
+                    `🤖 *[PAGO AUTO-CONFIRMADO POR IA]* 🤖\n\n` +
+                    `👤 *Titular:* ${vecNombre} (${vecCasa})\n` +
+                    `📱 *Celular:* ${senderPhone}\n` +
+                    `🎟️ *Números Pagados:* ${numerosStr}\n` +
+                    `💰 *Monto:* $${montoDetectado.toLocaleString('es-AR')}\n` +
+                    `🏦 *Entidad:* ${data.banco_origen || 'Transferencia'}\n` +
+                    `🧾 *N° Operación:* \`${opId}\`\n` +
+                    `📅 *Fecha:* ${data.fecha_hora || '-'}`
+                );
+            }
             return true;
         }
 
