@@ -285,10 +285,11 @@ async function downloadMediaCustom(client, msg) {
                 const encFilehash = msgObj.encFilehash || msgObj.mediaData?.encFilehash;
                 const filehash = msgObj.filehash || msgObj.mediaData?.filehash;
                 const mediaKey = msgObj.mediaKey || msgObj.mediaData?.mediaKey;
-                const mediaKeyTimestamp = msgObj.mediaKeyTimestamp || msgObj.mediaData?.mediaKeyTimestamp;
                 const mediaType = msgObj.type || msgObj.mediaData?.type || 'image';
-
-                const mime = msgObj.mimetype || msgObj.mediaData?.mimetype || 'image/jpeg';
+                const isDoc = (mediaType === 'document' || msgObj.type === 'document' || (msgObj.mimetype && msgObj.mimetype.includes('pdf')));
+                const defaultMime = isDoc ? 'application/pdf' : 'image/jpeg';
+                const mime = msgObj.mimetype || msgObj.mediaData?.mimetype || defaultMime;
+                const defaultFilename = isDoc ? 'comprobante.pdf' : 'comprobante.jpg';
 
                 // Opción A: A través de WAWebDownloadManager con Proxy QPL y mimetype
                 try {
@@ -313,7 +314,7 @@ async function downloadMediaCustom(client, msg) {
                                 return {
                                     data,
                                     mimetype: mime,
-                                    filename: msgObj.filename || msgObj.mediaData?.filename || 'comprobante.jpg'
+                                    filename: msgObj.filename || msgObj.mediaData?.filename || defaultFilename
                                 };
                             }
                         }
@@ -337,8 +338,8 @@ async function downloadMediaCustom(client, msg) {
                                 const data = await window.WWebJS.arrayBufferToBase64Async(buf);
                                 return {
                                     data,
-                                    mimetype: msgObj.mimetype || 'image/jpeg',
-                                    filename: msgObj.filename || 'comprobante.jpg'
+                                    mimetype: msgObj.mimetype || defaultMime,
+                                    filename: msgObj.filename || defaultFilename
                                 };
                             }
                         }
@@ -357,8 +358,8 @@ async function downloadMediaCustom(client, msg) {
                             const data = await window.WWebJS.arrayBufferToBase64Async(buf);
                             return {
                                 data,
-                                mimetype: msgObj.mimetype || 'image/jpeg',
-                                filename: msgObj.filename || 'comprobante.jpg'
+                                mimetype: msgObj.mimetype || defaultMime,
+                                filename: msgObj.filename || defaultFilename
                             };
                         }
                     }
@@ -374,8 +375,8 @@ async function downloadMediaCustom(client, msg) {
                         const data = await window.WWebJS.arrayBufferToBase64Async(buf);
                         return {
                             data,
-                            mimetype: msgObj.mimetype || 'image/jpeg',
-                            filename: msgObj.filename || 'comprobante.jpg'
+                            mimetype: msgObj.mimetype || defaultMime,
+                            filename: msgObj.filename || defaultFilename
                         };
                     }
                 } catch (errBlob) {
@@ -390,8 +391,8 @@ async function downloadMediaCustom(client, msg) {
                         const data = await window.WWebJS.arrayBufferToBase64Async(buf);
                         return {
                             data,
-                            mimetype: msgObj.mimetype || 'image/jpeg',
-                            filename: msgObj.filename || 'comprobante.jpg'
+                            mimetype: msgObj.mimetype || defaultMime,
+                            filename: msgObj.filename || defaultFilename
                         };
                     }
                 } catch (errUrl) {
@@ -563,20 +564,9 @@ async function handleReceiptMedia(msg, client, chatId, senderPhone, isUserAdmin)
         await sendReply(client, chatId, `⏳ *Analizando tu comprobante de pago con Inteligencia Artificial...*`);
 
         let dataToAnalyze = media.data;
-        let mimeToAnalyze = media.mimetype;
-
-        // Si es un documento PDF, convertir la primera página a imagen para procesarla con visión
-        if (media.mimetype && media.mimetype.includes('pdf')) {
-            console.log(`[Media] Detectado documento PDF de ${senderPhone}. Convirtiendo a imagen con Puppeteer...`);
-            const converted = await pdf.convertPdfToImage(client, media.data);
-            if (converted && converted.base64) {
-                dataToAnalyze = converted.base64;
-                mimeToAnalyze = converted.mimeType;
-                console.log(`[Media] ✅ PDF convertido con éxito a imagen JPEG.`);
-            } else {
-                console.warn(`[Media] ⚠️ No se pudo convertir el PDF a imagen. Se intentará análisis directo.`);
-            }
-        }
+        let mimeToAnalyze = (media.mimetype && media.mimetype.toLowerCase().includes('pdf')) 
+            ? 'application/pdf' 
+            : (media.mimetype || 'image/jpeg');
 
         const kbSize = Math.round((dataToAnalyze?.length || 0) * 0.75 / 1024);
         console.log(`[IA] Enviando archivo a analizar (${kbSize} KB, mimetype: ${mimeToAnalyze})...`);

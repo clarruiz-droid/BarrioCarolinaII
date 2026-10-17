@@ -135,10 +135,10 @@ async function getSupportedGeminiModels(apiKey) {
                     .map(m => m.name.replace(/^models\//, ''));
 
                 const preferredModels = [
-                    'gemini-1.5-flash',
-                    'gemini-2.0-flash',
-                    'gemini-1.5-flash-8b',
+                    'gemini-3.5-flash',
+                    'gemini-2.5-flash',
                     'gemini-flash-latest',
+                    'gemini-3.7-flash',
                     'gemini-3.8-flash'
                 ];
 
@@ -155,7 +155,7 @@ async function getSupportedGeminiModels(apiKey) {
         console.error('[Gemini] Error consultando ListModels:', e.message);
     }
 
-    return ['gemini-1.5-flash', 'gemini-flash-latest', 'gemini-3.8-flash'];
+    return ['gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-flash-latest'];
 }
 
 async function analyzeReceiptGemini(base64Data, mimeType = 'image/jpeg') {
@@ -259,22 +259,37 @@ async function analyzeReceipt(base64Data, mimeType = 'image/jpeg') {
         };
     }
 
-    // 1. Si está configurado Groq, usarlo como opción primaria (gratis y alta velocidad)
-    if (config.GROQ_API_KEY) {
-        const groqResult = await analyzeReceiptGroq(base64Data, mimeType);
-        if (groqResult && groqResult.success) {
-            return groqResult;
-        }
-        if (config.GEMINI_API_KEY) {
-            console.log('[AI] Groq no pudo procesar la imagen, cambiando automáticamente a Gemini...');
-        }
-    }
+    const isPdf = Boolean(mimeType && mimeType.toLowerCase().includes('pdf'));
 
-    // 2. Probar con Google Gemini como alternativa o si Groq no está configurado
-    if (config.GEMINI_API_KEY) {
-        const geminiResult = await analyzeReceiptGemini(base64Data, mimeType);
-        if (geminiResult && geminiResult.success) {
-            return geminiResult;
+    // 1. Si es un documento PDF, procesarlo directamente de forma nativa con Gemini
+    if (isPdf) {
+        if (config.GEMINI_API_KEY) {
+            console.log('[AI] 📄 Documento PDF detectado. Procesando de forma nativa con Gemini...');
+            const geminiResult = await analyzeReceiptGemini(base64Data, 'application/pdf');
+            if (geminiResult && geminiResult.success) {
+                return geminiResult;
+            }
+        } else {
+            console.warn('[AI] ⚠️ Se recibió un PDF pero GEMINI_API_KEY no está configurada.');
+        }
+    } else {
+        // 2. Si es una imagen (JPG/PNG), usar Groq como opción primaria (alta velocidad)
+        if (config.GROQ_API_KEY) {
+            const groqResult = await analyzeReceiptGroq(base64Data, mimeType);
+            if (groqResult && groqResult.success) {
+                return groqResult;
+            }
+            if (config.GEMINI_API_KEY) {
+                console.log('[AI] Groq no pudo procesar la imagen, cambiando automáticamente a Gemini...');
+            }
+        }
+
+        // 3. Respaldo en Gemini para imágenes
+        if (config.GEMINI_API_KEY) {
+            const geminiResult = await analyzeReceiptGemini(base64Data, mimeType);
+            if (geminiResult && geminiResult.success) {
+                return geminiResult;
+            }
         }
     }
 

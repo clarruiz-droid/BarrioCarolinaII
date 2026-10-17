@@ -69,10 +69,11 @@ if (fs.existsSync(messageFile)) {
             const encFilehash = msg.encFilehash || msg.mediaData?.encFilehash;
             const filehash = msg.filehash || msg.mediaData?.filehash;
             const mediaKey = msg.mediaKey || msg.mediaData?.mediaKey;
-            const mediaKeyTimestamp = msg.mediaKeyTimestamp || msg.mediaData?.mediaKeyTimestamp;
             const mediaType = msg.type || msg.mediaData?.type || 'image';
-
-            const mime = msg.mimetype || msg.mediaData?.mimetype || 'image/jpeg';
+            const isDoc = (mediaType === 'document' || msg.type === 'document' || (msg.mimetype && msg.mimetype.includes('pdf')));
+            const defaultMime = isDoc ? 'application/pdf' : 'image/jpeg';
+            const mime = msg.mimetype || msg.mediaData?.mimetype || defaultMime;
+            const defaultFilename = isDoc ? 'comprobante.pdf' : 'comprobante.jpg';
 
             try {
                 const mockQpl = new Proxy({}, { get: () => () => mockQpl });
@@ -94,8 +95,8 @@ if (fs.existsSync(messageFile)) {
                 if (data && data.length > 500) {
                     return {
                         data,
-                        mimetype: msg.mimetype || msg.mediaData?.mimetype || 'image/jpeg',
-                        filename: msg.filename || msg.mediaData?.filename || 'comprobante.jpg',
+                        mimetype: msg.mimetype || msg.mediaData?.mimetype || defaultMime,
+                        filename: msg.filename || msg.mediaData?.filename || defaultFilename,
                         filesize: msg.size || data.length,
                     };
                 }
@@ -109,8 +110,8 @@ if (fs.existsSync(messageFile)) {
                             const data = await window.WWebJS.arrayBufferToBase64Async(buffer);
                             return {
                                 data,
-                                mimetype: msg.mimetype || 'image/jpeg',
-                                filename: msg.filename || 'comprobante.jpg',
+                                mimetype: msg.mimetype || defaultMime,
+                                filename: msg.filename || defaultFilename,
                                 filesize: msg.size || 0,
                             };
                         }
