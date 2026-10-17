@@ -730,8 +730,8 @@ async function handleReceiptMedia(msg, client, chatId, senderPhone, isUserAdmin)
         const montoDetectado = Number(data.monto) || 0;
         const deudaTotal = pendingNums.length * config.PRECIO_NUMERO;
 
-        // Validar si el monto cubre la deuda y la auto-aprobación está activa
-        if (pendingNums.length > 0 && montoDetectado >= deudaTotal && deudaTotal > 0 && config.AUTO_APROBAR_COMPROBANTES && !cbuInvalido) {
+        // Validar si el monto cubre la deuda y la auto-aprobación está activa (y las ventas siguen abiertas)
+        if (pendingNums.length > 0 && montoDetectado >= deudaTotal && deudaTotal > 0 && config.AUTO_APROBAR_COMPROBANTES && !cbuInvalido && db.areSalesOpen()) {
             const vecNombre = pendingNums[0].vecino || data.emisor_nombre || contactPushname || 'Vecino';
             const vecCasa = pendingNums[0].casa || '-';
             const numerosConfirmados = [];
@@ -808,9 +808,11 @@ async function handleReceiptMedia(msg, client, chatId, senderPhone, isUserAdmin)
             return true;
         }
 
-        // Si no se pudo auto-aprobar (monto parcial, sin reservas o auto-aprobación desactivada)
+        // Si no se pudo auto-aprobar (monto parcial, sin reservas, auto-aprobación desactivada o ventas cerradas)
         let motivo = '';
-        if (cbuInvalido) {
+        if (!db.areSalesOpen()) {
+            motivo = 'Las ventas automáticas se encuentran cerradas por inicio del sorteo. Derivado para confirmación manual de los administradores.';
+        } else if (cbuInvalido) {
             motivo = 'El CBU de destino detectado en el comprobante no coincide con la cuenta oficial.';
         } else if (pendingNums.length === 0) {
             motivo = 'No se encontraron reservas pendientes asociadas a este teléfono ni al nombre del titular.';
@@ -950,11 +952,31 @@ async function handleMessage(msg, client) {
                 await cmdLiberar(client, currentGroupId, args);
                 return;
             }
+            if (command === 'cerrar' || command === 'bloquear') {
+                await cmdCerrarVentas(client, currentGroupId);
+                return;
+            }
+            if (command === 'abrir' || command === 'desbloquear') {
+                await cmdAbrirVentas(client, currentGroupId);
+                return;
+            }
+            if (command === 'estado' || command === 'estadosorteo') {
+                await cmdEstadoSorteo(client, currentGroupId);
+                return;
+            }
+            if (command === 'ver' || command === 'info') {
+                await cmdVerNumero(client, currentGroupId, args);
+                return;
+            }
             if (command === 'ayuda' || command === 'help' || command === 'comandos') {
                 await sendReply(
                     client,
                     currentGroupId,
                     `👑 *COMANDOS DEL GRUPO DE ADMINISTRACIÓN:*\n\n` +
+                    `• \`!cerrar\` ➡️ Bloquea/cierra las ventas antes del sorteo.\n` +
+                    `• \`!abrir\` ➡️ Reabre las ventas de números.\n` +
+                    `• \`!estado\` ➡️ Muestra si las ventas están abiertas o cerradas.\n` +
+                    `• \`!ver <numero>\` ➡️ Muestra la fecha de compra y ficha de un número.\n` +
                     `• \`!pagado <numero>\` ➡️ Confirma el pago de un número.\n` +
                     `• \`!liberar <numero>\` ➡️ Libera un número reservado.\n` +
                     `• \`!pendientes\` ➡️ Lista de reservas pendientes de pago.\n` +
@@ -1040,15 +1062,25 @@ async function handleMessage(msg, client) {
 function buildMainMenu(isAdminUser) {
     const premiosTexto = (config.PREMIOS || '').replace(/\\n/g, '\n');
     const modalidadTexto = (config.MODALIDAD_SORTEO || '').replace(/\\n/g, '\n');
+    const ventasAbiertas = db.areSalesOpen();
 
     let text = `🎲 *${config.EVENTO_NOMBRE}* 🎲\n\n`;
     text += `🎁 *Premios:*\n${premiosTexto}\n\n`;
     text += `📅 *Fecha del sorteo:* ${config.FECHA_SORTEO}\n`;
     text += `🎲 *Modalidad:* ${modalidadTexto}\n`;
     text += `💰 *Valor del número:* $${config.PRECIO_NUMERO.toLocaleString('es-AR')}\n\n`;
+
+    if (!ventasAbiertas) {
+        text += `🔒 *ESTADO: VENTAS CERRADAS POR SORTEO*\n\n`;
+    }
+
     text += `━━━━━━━━━━━━━━━━━━━━━\n`;
     text += `📋 *Por favor responde con el número de la opción:*\n\n`;
-    text += `1️⃣ 🎟️ *Elegir / Reservar un número*\n`;
+    if (ventasAbiertas) {
+        text += `1️⃣ 🎟️ *Elegir / Reservar un número*\n`;
+    } else {
+        text += `1️⃣ 🔒 *Reservar un número (CERRADO POR SORTEO)*\n`;
+    }
     text += `2️⃣ 📋 *Ver números disponibles*\n`;
     text += `3️⃣ 🔍 *Consultar mis números y pagos*\n`;
     text += `4️⃣ 💳 *Datos para transferir (Alias/CBU)*\n`;
@@ -1064,14 +1096,17 @@ function buildMainMenu(isAdminUser) {
 }
 
 function buildAdminMenu() {
+    const ventasAbiertas = db.areSalesOpen();
     let text = `👑 *MENÚ DE ADMINISTRADOR* 👑\n\n`;
+    text += `Estado: ${ventasAbiertas ? '🟢 *VENTAS ABIERTAS*' : '🔴 *VENTAS CERRADAS (BLOQUEADO)*'}\n\n`;
     text += `Elige una opción:\n\n`;
     text += `1️⃣ ✅ *Confirmar pago de un número*\n`;
     text += `2️⃣ ♻️ *Liberar un número*\n`;
     text += `3️⃣ ⏳ *Ver reservas pendientes de pago*\n`;
     text += `4️⃣ 🟢 *Ver listado de números pagados*\n`;
     text += `5️⃣ 📊 *Ver balance y recaudación*\n`;
-    text += `6️⃣ 📋 *Ver tablero completo*\n\n`;
+    text += `6️⃣ 📋 *Ver tablero completo*\n`;
+    text += `7️⃣ ${ventasAbiertas ? '🔒 *Cerrar Ventas (Bloquear antes del sorteo)*' : '🔓 *Reabrir Ventas*'}\n\n`;
     text += `0️⃣ 🔙 *Volver al menú principal*`;
     return text;
 }
@@ -1112,6 +1147,17 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
     // Manejador del Menú Principal
     if (session.step === 'MENU') {
         if (input === '1') {
+            if (!db.areSalesOpen()) {
+                await sendReply(
+                    client,
+                    chatId,
+                    `🔒 *VENTAS CERRADAS POR SORTEO*\n\n` +
+                    `La venta y reserva de números ha finalizado porque el sorteo está próximo a realizarse (o ya se encuentra en curso).\n\n` +
+                    `🍀 ¡Muchas gracias a todos los vecinos por colaborar con la Sede Social!\n\n` +
+                    `🔙 _Escribe 0 para volver al menú_`
+                );
+                return true;
+            }
             session.step = 'WAITING_NUMBER';
             session.tempData = {};
             await sendReply(
@@ -1124,11 +1170,12 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
             return true;
         } else if (input === '2') {
             await cmdLibres(client, chatId);
+            const optReserva = db.areSalesOpen() ? `• Escribe *1* para reservar un número ahora\n` : `• _(Ventas cerradas por sorteo)_\n`;
             await sendReply(
                 client, 
                 chatId, 
                 `👉 *Opciones:*\n` +
-                `• Escribe *1* para reservar un número ahora\n` +
+                optReserva +
                 `• Escribe *0* para volver al menú principal`
             );
             return true;
@@ -1367,7 +1414,23 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
             return true;
         } else if (input === '6') {
             await cmdTablero(client, chatId);
-            await sendReply(client, chatId, `👉 Responde con *1* (Confirmar pago), *2* (Liberar), *3* (Pendientes), *4* (Pagados), *5* (Balance) o *0* (Volver)`);
+            await sendReply(client, chatId, `👉 Responde con *1* (Confirmar pago), *2* (Liberar), *3* (Pendientes), *4* (Pagados), *5* (Balance), *7* (Cerrar/Abrir) o *0* (Volver)`);
+            return true;
+        } else if (input === '7') {
+            const nuevoEstado = !db.areSalesOpen();
+            db.setSalesOpen(nuevoEstado);
+            if (nuevoEstado) {
+                await sendReply(client, chatId, `🔓 *VENTAS REABIERTAS*\n\nLos vecinos ya pueden volver a consultar y reservar números normalmente.`);
+                if (config.ADMIN_GRUPO_ID && chatId !== config.ADMIN_GRUPO_ID) {
+                    await sendReply(client, config.ADMIN_GRUPO_ID, `🔓 *AVISO COMISIÓN:* Las ventas del sorteo han sido *REABIERTAS*.`);
+                }
+            } else {
+                await sendReply(client, chatId, `🔒 *VENTAS CERRADAS POR SORTEO*\n\nA partir de este momento nadie podrá reservar números nuevos ni se auto-aprobarán pagos.`);
+                if (config.ADMIN_GRUPO_ID && chatId !== config.ADMIN_GRUPO_ID) {
+                    await sendReply(client, config.ADMIN_GRUPO_ID, `🔒 *AVISO COMISIÓN:* Las ventas del sorteo han sido *CERRADAS*.`);
+                }
+            }
+            await sendReply(client, chatId, buildAdminMenu());
             return true;
         } else if (input === '0') {
             session.step = 'MENU';
@@ -1375,7 +1438,7 @@ async function handleConversationFlow(client, chatId, text, session, senderPhone
             await sendReply(client, chatId, buildMainMenu(isUserAdmin));
             return true;
         } else {
-            await sendReply(client, chatId, `⚠️ Opción no válida.\nPor favor responde con 1, 2, 3, 4, 5, 6 o 0 para volver al menú principal:`);
+            await sendReply(client, chatId, `⚠️ Opción no válida.\nPor favor responde con 1, 2, 3, 4, 5, 6, 7 o 0 para volver al menú principal:`);
             return true;
         }
     }
@@ -1612,12 +1675,113 @@ async function handleDirectCommand(client, chatId, command, args, senderPhone) {
         case 'tablero':
             await cmdTablero(client, chatId);
             break;
+
+        case 'cerrar':
+        case 'bloquear':
+            await cmdCerrarVentas(client, chatId);
+            break;
+
+        case 'abrir':
+        case 'desbloquear':
+            await cmdAbrirVentas(client, chatId);
+            break;
+
+        case 'estado':
+        case 'estadosorteo':
+            await cmdEstadoSorteo(client, chatId);
+            break;
+
+        case 'ver':
+        case 'info':
+            await cmdVerNumero(client, chatId, args);
+            break;
     }
 }
 
 // -------------------------------------------------------------
-// FUNCIONES DE CONSULTA
+// FUNCIONES DE CONTROL DE VENTAS Y CONSULTA
 // -------------------------------------------------------------
+
+async function cmdCerrarVentas(client, chatId) {
+    db.setSalesOpen(false);
+    const text = `🔒 *VENTAS CERRADAS EXITOSAMENTE*\n\n` +
+                 `A partir de este momento:\n` +
+                 `• Los vecinos no podrán reservar números nuevos.\n` +
+                 `• Se suspende la auto-aprobación automática de pagos.\n` +
+                 `• Si alguien envía un comprobante, quedará en revisión manual.\n\n` +
+                 `💡 Para volver a habilitar las ventas, escribe: \`!abrir\` o usa el menú de administrador.`;
+    await sendReply(client, chatId, text);
+    if (config.ADMIN_GRUPO_ID && chatId !== config.ADMIN_GRUPO_ID) {
+        await sendReply(client, config.ADMIN_GRUPO_ID, `🔒 *AVISO COMISIÓN:* Las ventas del sorteo han sido *CERRADAS*.`);
+    }
+}
+
+async function cmdAbrirVentas(client, chatId) {
+    db.setSalesOpen(true);
+    const text = `🔓 *VENTAS ABIERTAS EXITOSAMENTE*\n\n` +
+                 `Los vecinos ya pueden volver a elegir, consultar y reservar números normalmente.\n\n` +
+                 `💡 Para cerrar las ventas antes del sorteo, escribe: \`!cerrar\`.`;
+    await sendReply(client, chatId, text);
+    if (config.ADMIN_GRUPO_ID && chatId !== config.ADMIN_GRUPO_ID) {
+        await sendReply(client, config.ADMIN_GRUPO_ID, `🔓 *AVISO COMISIÓN:* Las ventas del sorteo han sido *REABIERTAS*.`);
+    }
+}
+
+async function cmdEstadoSorteo(client, chatId) {
+    const isOpen = db.areSalesOpen();
+    const pagados = db.getPaidNumbers().length;
+    const pendientes = db.getPendingPayments().length;
+    const libres = db.getAvailableNumbers().length;
+    const total = config.NUMERO_MAX - config.NUMERO_MIN + 1;
+
+    let text = `📊 *ESTADO DEL SORTEO:*\n\n` +
+               `• Estado de ventas: ${isOpen ? '🟢 *VENTAS ABIERTAS*' : '🔴 *VENTAS CERRADAS (BLOQUEADO)*'}\n` +
+               `• Números pagados: *${pagados}* (${Math.round((pagados/total)*100)}%)\n` +
+               `• Reservas pendientes: *${pendientes}*\n` +
+               `• Números libres: *${libres}*\n` +
+               `• Total emisión: *${total}* números\n\n` +
+               `💡 Comandos: \`!cerrar\` para bloquear / \`!abrir\` para desbloquear.`;
+    await sendReply(client, chatId, text);
+}
+
+async function cmdVerNumero(client, chatId, args) {
+    if (!args || args.length === 0) {
+        await sendReply(client, chatId, `ℹ️ Uso: \`!ver <numero>\` (ejemplo: \`!ver 402\`)`);
+        return;
+    }
+    const num = db.normalizeNumber(args[0]);
+    if (!num) {
+        await sendReply(client, chatId, `❌ Número inválido.`);
+        return;
+    }
+    const item = db.getNumber(num);
+    if (!item) {
+        await sendReply(client, chatId, `❌ El número *${num}* no existe.`);
+        return;
+    }
+    let text = `🎟️ *INFORMACIÓN DEL NÚMERO ${num}:*\n\n` +
+               `• Estado: *${item.estado}*\n`;
+    if (item.estado !== 'LIBRE') {
+        text += `• Titular: *${item.vecino || '-'}*\n` +
+                `• Domicilio: *${item.casa || '-'}*\n` +
+                `• Teléfono: *${item.telefono || '-'}*\n`;
+        if (item.fechaReserva) {
+            const fRes = new Date(item.fechaReserva).toLocaleString('es-AR', { timeZone: 'America/Argentina/San_Juan' });
+            text += `• Fecha de Reserva: *${fRes}*\n`;
+        }
+        if (item.fechaPago) {
+            const fPago = new Date(item.fechaPago).toLocaleString('es-AR', { timeZone: 'America/Argentina/San_Juan' });
+            text += `• Fecha de Pago: *${fPago}*\n`;
+        }
+        if (item.confirmadoPor) {
+            text += `• Confirmado por: *${item.confirmadoPor}*\n`;
+        }
+        if (item.pagadorBancario) {
+            text += `• Pagador Bancario: *${item.pagadorBancario}*\n`;
+        }
+    }
+    await sendReply(client, chatId, text);
+}
 
 async function cmdLibres(client, chatId) {
     const libres = db.getAvailableNumbers();

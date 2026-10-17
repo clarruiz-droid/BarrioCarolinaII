@@ -74,6 +74,11 @@ function syncAndCleanDatabase(data) {
         modified = true;
     }
 
+    if (typeof data.ventasAbiertas === 'undefined') {
+        data.ventasAbiertas = true;
+        modified = true;
+    }
+
     data.numeros = cleanNumeros;
     data.precioPorNumero = config.PRECIO_NUMERO;
     data.evento = config.EVENTO_NOMBRE;
@@ -409,6 +414,24 @@ function registerReceipt(operationId, details = {}) {
     return true;
 }
 
+/**
+ * Indica si las ventas de números están abiertas para el público
+ */
+function areSalesOpen() {
+    const db = readRawData();
+    return db.ventasAbiertas !== false;
+}
+
+/**
+ * Habilita o deshabilita la venta de números de forma persistente
+ */
+function setSalesOpen(isOpen) {
+    const db = readRawData();
+    db.ventasAbiertas = Boolean(isOpen);
+    saveRawData(db);
+    return db.ventasAbiertas;
+}
+
 module.exports = {
     initDatabase,
     readRawData,
@@ -423,6 +446,8 @@ module.exports = {
     getPaidNumbers,
     getSummary,
     isReceiptProcessed,
-    registerReceipt
+    registerReceipt,
+    areSalesOpen,
+    setSalesOpen
 };
 
