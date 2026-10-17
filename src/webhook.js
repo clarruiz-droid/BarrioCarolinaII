@@ -2,10 +2,19 @@ const http = require('http');
 const config = require('./config');
 const db = require('./db');
 
+function isLid(id) {
+    if (!id) return false;
+    const str = String(id).trim();
+    if (str.endsWith('@lid')) return true;
+    const clean = str.replace(/\D/g, '');
+    return clean.length >= 14 && !clean.startsWith('54');
+}
+
 function formatPhoneNumber(phone) {
     if (!phone) return null;
     let clean = String(phone).replace(/\D/g, '');
     if (!clean || clean.length < 8) return null;
+    if (isLid(clean)) return null;
     if (clean.startsWith('54') && !clean.startsWith('549')) {
         clean = '549' + clean.slice(2);
     } else if (!clean.startsWith('54')) {
@@ -15,17 +24,74 @@ function formatPhoneNumber(phone) {
 }
 
 function formatWhatsAppId(phone) {
-    const formatted = formatPhoneNumber(phone);
+    if (!phone) return null;
+    const str = String(phone).trim();
+    if (str.endsWith('@c.us') || str.endsWith('@lid') || str.endsWith('@g.us')) {
+        return str;
+    }
+    const clean = str.replace(/\D/g, '');
+    if (!clean) return null;
+    if (isLid(str) || isLid(clean)) {
+        return clean + '@lid';
+    }
+    const formatted = formatPhoneNumber(clean);
     if (!formatted) return null;
     return formatted + '@c.us';
 }
 
 async function sendWhatsApp(client, targetChat, text) {
-    if (!client || !targetChat) return;
+    if (!client || !targetChat || !text) return;
     try {
-        await client.sendMessage(targetChat, text);
+        if (targetChat.endsWith('@lid') || targetChat.endsWith('@g.us')) {
+            try {
+                await client.sendMessage(targetChat, text);
+                return;
+            } catch (eDirect) {
+                console.warn(`[Webhook WhatsApp Directo a ${targetChat} falló]:`, eDirect.message);
+            }
+        }
+
+        let targetId = targetChat;
+        if (targetId.endsWith('@c.us') && typeof client.getNumberId === 'function') {
+            try {
+                const numberOnly = targetId.replace(/@c\.us$/, '');
+                const numberId = await client.getNumberId(numberOnly);
+                if (numberId && numberId._serialized) {
+                    targetId = numberId._serialized;
+                }
+            } catch (errId) {}
+        }
+
+        try {
+            await client.sendMessage(targetId, text);
+        } catch (errMain) {
+            if (errMain.message && errMain.message.includes('No LID') && targetId.endsWith('@c.us')) {
+                const rawNumber = targetId.replace(/@c\.us$/, '');
+                let alternateNumber = null;
+                if (rawNumber.startsWith('549')) {
+                    alternateNumber = '54' + rawNumber.slice(3);
+                } else if (rawNumber.startsWith('54')) {
+                    alternateNumber = '549' + rawNumber.slice(2);
+                }
+
+                if (alternateNumber) {
+                    try {
+                        let finalAlt = alternateNumber + '@c.us';
+                        if (typeof client.getNumberId === 'function') {
+                            const altId = await client.getNumberId(alternateNumber);
+                            if (altId && altId._serialized) {
+                                finalAlt = altId._serialized;
+                            }
+                        }
+                        await client.sendMessage(finalAlt, text);
+                        return;
+                    } catch (errAlt) {}
+                }
+            }
+            console.error(`[Webhook WhatsApp Error a ${targetChat}]:`, errMain.message);
+        }
     } catch (e) {
-        console.error(`[Webhook WhatsApp Error a ${targetChat}]:`, e.message);
+        console.error(`[Webhook WhatsApp Error general a ${targetChat}]:`, e.message);
     }
 }
 

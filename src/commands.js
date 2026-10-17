@@ -32,9 +32,20 @@ function resetSession(userId) {
     };
 }
 
+function isLid(id) {
+    if (!id) return false;
+    const str = String(id).trim();
+    if (str.endsWith('@lid')) return true;
+    const clean = str.replace(/\D/g, '');
+    return clean.length >= 14 && !clean.startsWith('54');
+}
+
 function cleanPhone(num) {
     if (!num) return '';
     let cleaned = String(num).replace(/\D/g, '');
+    if (isLid(cleaned)) {
+        return cleaned;
+    }
     if (cleaned.startsWith('549')) {
         cleaned = '54' + cleaned.slice(3);
     }
@@ -45,6 +56,7 @@ function formatPhoneNumber(phone) {
     if (!phone) return null;
     let clean = String(phone).replace(/\D/g, '');
     if (!clean || clean.length < 8) return null;
+    if (isLid(clean)) return null;
     if (clean.startsWith('54') && !clean.startsWith('549')) {
         clean = '549' + clean.slice(2);
     } else if (!clean.startsWith('54')) {
@@ -54,7 +66,17 @@ function formatPhoneNumber(phone) {
 }
 
 function formatWhatsAppId(phone) {
-    const formatted = formatPhoneNumber(phone);
+    if (!phone) return null;
+    const str = String(phone).trim();
+    if (str.endsWith('@c.us') || str.endsWith('@lid') || str.endsWith('@g.us')) {
+        return str;
+    }
+    const clean = str.replace(/\D/g, '');
+    if (!clean) return null;
+    if (isLid(str) || isLid(clean)) {
+        return clean + '@lid';
+    }
+    const formatted = formatPhoneNumber(clean);
     if (!formatted) return null;
     return formatted + '@c.us';
 }
@@ -129,17 +151,76 @@ function isBotGeneratedMessage(text) {
 }
 
 /**
- * Enviar mensaje de forma directa y segura
+ * Enviar mensaje de forma directa y segura con resolución de LID y reintento de formato
  */
 async function sendReply(client, chatId, text) {
+    if (!client || !chatId || !text) return false;
     try {
-        if (text) {
-            recordSentMessage(text);
+        recordSentMessage(text);
+
+        // 1. Si es grupo (@g.us) o LID directo (@lid), intentar envío directo
+        if (chatId.endsWith('@lid') || chatId.endsWith('@g.us')) {
+            try {
+                await client.sendMessage(chatId, text);
+                return true;
+            } catch (errDirect) {
+                console.warn(`[sendReply directo a ${chatId} falló]:`, errDirect.message);
+            }
         }
-        await client.sendMessage(chatId, text);
-        return true;
+
+        // 2. Si es un número @c.us, intentar resolver con getNumberId
+        let targetId = chatId;
+        if (targetId.endsWith('@c.us') && typeof client.getNumberId === 'function') {
+            try {
+                const numberOnly = targetId.replace(/@c\.us$/, '');
+                const numberId = await client.getNumberId(numberOnly);
+                if (numberId && numberId._serialized) {
+                    targetId = numberId._serialized;
+                }
+            } catch (errId) {
+                // Continuar con targetId original si falla getNumberId
+            }
+        }
+
+        // 3. Intento principal de envío
+        try {
+            await client.sendMessage(targetId, text);
+            return true;
+        } catch (errMain) {
+            // 4. Si el error es "No LID for user" y es un teléfono argentino @c.us
+            if (errMain.message && errMain.message.includes('No LID') && targetId.endsWith('@c.us')) {
+                const rawNumber = targetId.replace(/@c\.us$/, '');
+                let alternateNumber = null;
+                if (rawNumber.startsWith('549')) {
+                    // Probar sin el 9: 54...
+                    alternateNumber = '54' + rawNumber.slice(3);
+                } else if (rawNumber.startsWith('54')) {
+                    // Probar con el 9: 549...
+                    alternateNumber = '549' + rawNumber.slice(2);
+                }
+
+                if (alternateNumber) {
+                    try {
+                        let finalAlt = alternateNumber + '@c.us';
+                        if (typeof client.getNumberId === 'function') {
+                            const altId = await client.getNumberId(alternateNumber);
+                            if (altId && altId._serialized) {
+                                finalAlt = altId._serialized;
+                            }
+                        }
+                        await client.sendMessage(finalAlt, text);
+                        return true;
+                    } catch (errAlt) {
+                        console.error(`[Error reintento alternativo a ${alternateNumber}]:`, errAlt.message);
+                    }
+                }
+            }
+
+            console.error(`[Error enviando mensaje a ${chatId}]:`, errMain.message);
+            return false;
+        }
     } catch (e) {
-        console.error(`[Error enviando mensaje a ${chatId}]:`, e.message);
+        console.error(`[Error general enviando mensaje a ${chatId}]:`, e.message);
         return false;
     }
 }
