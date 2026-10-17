@@ -285,6 +285,7 @@ async function downloadMediaCustom(client, msg) {
                 const encFilehash = msgObj.encFilehash || msgObj.mediaData?.encFilehash;
                 const filehash = msgObj.filehash || msgObj.mediaData?.filehash;
                 const mediaKey = msgObj.mediaKey || msgObj.mediaData?.mediaKey;
+                const mediaKeyTimestamp = msgObj.mediaKeyTimestamp || msgObj.mediaData?.mediaKeyTimestamp;
                 const mediaType = msgObj.type || msgObj.mediaData?.type || 'image';
                 const isDoc = (mediaType === 'document' || msgObj.type === 'document' || (msgObj.mimetype && msgObj.mimetype.includes('pdf')));
                 const defaultMime = isDoc ? 'application/pdf' : 'image/jpeg';

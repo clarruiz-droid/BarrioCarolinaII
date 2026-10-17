@@ -69,6 +69,7 @@ if (fs.existsSync(messageFile)) {
             const encFilehash = msg.encFilehash || msg.mediaData?.encFilehash;
             const filehash = msg.filehash || msg.mediaData?.filehash;
             const mediaKey = msg.mediaKey || msg.mediaData?.mediaKey;
+            const mediaKeyTimestamp = msg.mediaKeyTimestamp || msg.mediaData?.mediaKeyTimestamp;
             const mediaType = msg.type || msg.mediaData?.type || 'image';
             const isDoc = (mediaType === 'document' || msg.type === 'document' || (msg.mimetype && msg.mimetype.includes('pdf')));
             const defaultMime = isDoc ? 'application/pdf' : 'image/jpeg';
