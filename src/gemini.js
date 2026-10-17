@@ -1,4 +1,5 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const pdfParse = require('pdf-parse');
 const config = require('./config');
 
 /**
@@ -36,22 +37,103 @@ function isGeminiConfigured() {
     return isAIConfigured();
 }
 
+/**
+ * Extrae texto digital nativo de un archivo PDF en base64
+ */
+async function extractTextFromPdf(base64Data) {
+    try {
+        const buffer = Buffer.from(base64Data, 'base64');
+        const data = await pdfParse(buffer);
+        return data && data.text ? data.text.trim() : '';
+    } catch (err) {
+        console.error('[PDF] Error al extraer texto del documento:', err.message);
+        return '';
+    }
+}
+
 // --------------------------------------------------------------------------
-// PROVEEDOR 1: GROQ (Meta Llama 3.2 Vision - Ultra rápido y 100% gratis)
+// PROVEEDOR 1: GROQ (Llama 3.3 70B para texto / Qwen 2.5 27B para visión)
 // --------------------------------------------------------------------------
+
+/**
+ * Analiza el texto digital extraído de un comprobante PDF utilizando Groq Llama 3.3 70B
+ */
+async function analyzeReceiptTextGroq(extractedText) {
+    if (!config.GROQ_API_KEY || !extractedText || extractedText.length < 10) return null;
+
+    const groqTextModels = [
+        'llama-3.3-70b-versatile',
+        'llama-3.1-8b-instant'
+    ];
+
+    const promptText = `${RECEIPT_PROMPT}\n\nA continuación se presenta el texto completo extraído digitalmente del comprobante:\n\n"""\n${extractedText}\n"""`;
+
+    for (const modelName of groqTextModels) {
+        try {
+            console.log(`[Groq] Analizando texto digital de PDF con modelo ${modelName}...`);
+            const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${config.GROQ_API_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: modelName,
+                    messages: [
+                        {
+                            role: 'user',
+                            content: promptText
+                        }
+                    ],
+                    max_tokens: 500,
+                    temperature: 0.1,
+                    response_format: { type: 'json_object' }
+                })
+            });
+
+            if (!response.ok) {
+                const errText = await response.text();
+                console.log(`[Groq Error en ${modelName}]: HTTP ${response.status} - ${errText}`);
+                continue;
+            }
+
+            const resData = await response.json();
+            const rawContent = resData.choices?.[0]?.message?.content;
+            if (!rawContent) continue;
+
+            const cleanJson = rawContent
+                .replace(/^```json\s*/i, '')
+                .replace(/^```\s*/i, '')
+                .replace(/\s*```$/i, '')
+                .trim();
+
+            const parsed = JSON.parse(cleanJson);
+            console.log(`[Groq] ✅ Análisis exitoso de PDF con ${modelName}:`, JSON.stringify(parsed));
+            return {
+                success: true,
+                data: parsed,
+                provider: 'groq'
+            };
+        } catch (err) {
+            console.error(`[Groq Error en ${modelName}]:`, err.message || err);
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Analiza una imagen de comprobante (JPG/PNG) utilizando el modelo multimodal de Groq
+ */
 async function analyzeReceiptGroq(base64Data, mimeType = 'image/jpeg') {
     if (!config.GROQ_API_KEY) return null;
 
-    // Solo procesar imágenes con Groq (para PDFs se usa Gemini)
     if (mimeType && mimeType.includes('pdf')) {
         return null;
     }
 
     const groqModels = [
-        'qwen/qwen3.8-27b',
-        'qwen3.8-27b',
-        'llama-3.2-11b-vision-preview',
-        'llama-3.2-90b-vision-preview'
+        'qwen/qwen3.8-27b'
     ];
 
     const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${base64Data}`;
@@ -76,6 +158,7 @@ async function analyzeReceiptGroq(base64Data, mimeType = 'image/jpeg') {
                             ]
                         }
                     ],
+                    max_tokens: 500,
                     temperature: 0.1,
                     response_format: { type: 'json_object' }
                 })
@@ -261,16 +344,31 @@ async function analyzeReceipt(base64Data, mimeType = 'image/jpeg') {
 
     const isPdf = Boolean(mimeType && mimeType.toLowerCase().includes('pdf'));
 
-    // 1. Si es un documento PDF, procesarlo directamente de forma nativa con Gemini
+    // 1. Si es un documento PDF:
     if (isPdf) {
+        // Opción primaria: Extraer texto digital y analizar con Groq Llama 3.3 70B (gratis y ultra veloz)
+        if (config.GROQ_API_KEY) {
+            console.log('[AI] 📄 Documento PDF detectado. Extrayendo texto digital para análisis en Groq...');
+            const extractedText = await extractTextFromPdf(base64Data);
+            if (extractedText && extractedText.length >= 15) {
+                const groqTextResult = await analyzeReceiptTextGroq(extractedText);
+                if (groqTextResult && groqTextResult.success) {
+                    return groqTextResult;
+                }
+            } else {
+                console.log('[AI] El PDF no contiene suficiente texto digital directo.');
+            }
+        }
+
+        // Respaldo secundario: Gemini multimodal si está configurado
         if (config.GEMINI_API_KEY) {
-            console.log('[AI] 📄 Documento PDF detectado. Procesando de forma nativa con Gemini...');
+            console.log('[AI] 📄 Procesando PDF de forma nativa con Gemini como respaldo...');
             const geminiResult = await analyzeReceiptGemini(base64Data, 'application/pdf');
             if (geminiResult && geminiResult.success) {
                 return geminiResult;
             }
-        } else {
-            console.warn('[AI] ⚠️ Se recibió un PDF pero GEMINI_API_KEY no está configurada.');
+        } else if (!config.GROQ_API_KEY) {
+            console.warn('[AI] ⚠️ Se recibió un PDF pero no hay ningún proveedor de IA configurado.');
         }
     } else {
         // 2. Si es una imagen (JPG/PNG), usar Groq como opción primaria (alta velocidad)
