@@ -1,9 +1,9 @@
 # 📋 Listado Oficial de Números Pagados
 
 **Bono Contribución Sede Social - Barrio Carolina II**
-*Fecha de corte:* 17/10/2026, 08:02:48 hs
-*Total de números vendidos y pagados:* **251** / 1000
-*Total recaudado:* **$753.000**
+*Fecha de corte:* 17/10/2026, 09:00:45 hs
+*Total de números vendidos y pagados:* **262** / 1000
+*Total recaudado:* **$786.000**
 
 | N° | Titular | Domicilio / Manzana y Casa | Teléfono | Fecha de Compra / Pago |
 | :---: | :--- | :--- | :---: | :---: |
@@ -48,6 +48,7 @@
 | **040** | Alberto García | 9 de julio 651 este | `5492646706046` | 10/10/2026, 02:49 p. m. hs |
 | **041** | Natalia Cosentjno | Barrio Carolina II casa 3 Mza b | `5492645219899` | 06/10/2026, 12:53 p. m. hs |
 | **042** | Victoria de la Vega | Barrio Carolina II manzana D casa 12 | `5492644119855` | 06/10/2026, 07:04 p. m. hs |
+| **043** | Emmanuel Campo | Barrio Carolina II manzana A casa 23 | `5492644400538` | 17/10/2026, 08:28 p. m. hs |
 | **044** | Juan ginestar | Mb c4 | `5492644819740` | 17/10/2026, 09:42 a. m. hs |
 | **045** | Lorena rubilar | Mc c33 | `5492644004433` | 16/10/2026, 04:03 p. m. hs |
 | **046** | Gimeni | Mb c8 | `5492646622648` | 17/10/2026, 07:24 p. m. hs |
@@ -152,6 +153,7 @@
 | **219** | Liliana Giuliani | Casa 4 manzana A | `5492644124325` | 17/10/2026, 07:42 p. m. hs |
 | **220** | Alejandro Beja | Me c7 | `5492646603367` | 17/10/2026, 10:06 a. m. hs |
 | **221** | Mary oyola | M e c 8 | `5492645011036` | 13/10/2026, 09:36 p. m. hs |
+| **222** | Valeria Montes | Barrio carolina II m E casa 25 | `5492644133389` | 17/10/2026, 08:27 p. m. hs |
 | **223** | Sara Ripoll | Casa 4 manzana A | `5492644124325` | 17/10/2026, 07:45 p. m. hs |
 | **225** | Mary oyola | ME c8 | `5492645011036` | 08/10/2026, 12:11 p. m. hs |
 | **226** | Sofía Trigo | Av. Paula A. de Sarmiento 753 (sur) | `158394266714332` | 05/10/2026, 11:12 p. m. hs |
@@ -170,6 +172,7 @@
 | **264** | Ana Pizarro | Barrio Carolina 2 manzana B casa 6 | `5492644512480` | 10/10/2026, 10:23 p. m. hs |
 | **271** | Cecilia Radi | Barrio Carolina ll Mna E casa 20 | `5492645825856` | 17/10/2026, 10:47 a. m. hs |
 | **274** | Cynthia Mirarchi | José Martí 1211 (sur) | `158394266714332` | 06/10/2026, 10:17 p. m. hs |
+| **280** | Natalia Cosentjno | Barrio Carolina II casa 3 Mza b | `5492645219898` | 17/10/2026, 08:55 p. m. hs |
 | **282** | Camila Tommasini | Casa 20 mzna C | `5492646292017` | 07/10/2026, 11:54 p. m. hs |
 | **283** | Camila Tommasini | Casa 20 mzna C | `5492646292017` | 07/10/2026, 11:42 p. m. hs |
 | **284** | Maria Eugenia Igualada | Barrio Carolina II Manzana B Casa 2 | `5492645046157` | 06/10/2026, 08:29 p. m. hs |
@@ -183,6 +186,7 @@
 | **314** | Camila Tommasini | Casa 20 mzna C | `5492646292017` | 07/10/2026, 10:01 p. m. hs |
 | **315** | Estela navas | Me | `5492644183926` | 17/10/2026, 01:17 p. m. hs |
 | **321** | GUILLERMO PURDHAM | Manzana E Casa 24 | `5492646611187` | 10/10/2026, 11:04 a. m. hs |
+| **323** | Sara Ripoll | Casa 4 Manzano !A | `5492644124325` | 17/10/2026, 08:38 p. m. hs |
 | **328** | Marcelo ivancik | Cipolletti | `5492645099234` | 08/10/2026, 12:05 p. m. hs |
 | **333** | Laura mercado | Ma c16 | `5492646619939` | 17/10/2026, 02:04 p. m. hs |
 | **344** | Daniela Elisa Andreoni López | Barrio Carolina 2 Manzana C casa 14 | `5492646317735` | 07/10/2026, 10:33 p. m. hs |
@@ -197,6 +201,7 @@
 | **386** | Hugo Moreno | Barrio carolina II manzana a casa 14 | `5492645369277` | 17/10/2026, 10:23 a. m. hs |
 | **388** | Lucia Salinas | Barrio Carolina II. MANZANA E . CASA 4 | `5492645880616` | 13/10/2026, 10:56 p. m. hs |
 | **390** | Miriam Lujan | Casa 4 manzana A | `54930154926440…` | 06/10/2026, 08:33 p. m. hs |
+| **400** | Natalia Cosentjno | Barrio Carolina II casa 3 Mza b | `5492645219898` | 17/10/2026, 08:53 p. m. hs |
 | **402** | Mercedes Páez | Barrio La Ernestina, casa 14 | `5492644681550` | 17/10/2026, 03:29 p. m. hs |
 | **406** | Gimeno | Mb c8 | `5492646622648` | 17/10/2026, 07:24 p. m. hs |
 | **407** | Sofía Trigo | Av. Paula A. de Sarmiento 753 (sur) | `158394266714332` | 05/10/2026, 11:12 p. m. hs |
@@ -213,7 +218,9 @@
 | **500** | Lucia Salinas | Barrio Carolina II. MANZANA E . CASA 4 | `5492645880616` | 13/10/2026, 10:50 p. m. hs |
 | **507** | Estela navas | Me | `5492644183926` | 17/10/2026, 01:17 p. m. hs |
 | **508** | Gimeno | Mb c8 | `5492646622648` | 17/10/2026, 07:24 p. m. hs |
+| **509** | Jimena Fernández | Casa 4 manzana A | `5492644124325` | 17/10/2026, 08:26 p. m. hs |
 | **510** | Liliana Giuliani | Casa 4 manzana A | `5492644124325` | 17/10/2026, 07:42 p. m. hs |
+| **513** | Daniela Fernández | Casa 4 manzana A | `5492744124325` | 17/10/2026, 08:40 p. m. hs |
 | **519** | Daniel Barud | Carolina II cada 10 mza D | `5492645030044` | 05/10/2026, 05:09 p. m. hs |
 | **527** | Juan ginestar | Mb c4 | `5492644819740` | 17/10/2026, 09:42 a. m. hs |
 | **530** | Susana Lopez | Casa 7 manzana A | `54930154926444…` | 05/10/2026, 05:00 p. m. hs |
@@ -222,6 +229,7 @@
 | **578** | Victoria | Mb c9 | `5492645417522` | 17/10/2026, 03:00 p. m. hs |
 | **584** | Mariela bustos | Me c21 | `5492644831797` | 13/10/2026, 10:45 p. m. hs |
 | **586** | Mariela garcia | Me c14 | `5492644516492` | 17/10/2026, 12:19 p. m. hs |
+| **607** | Jeremías Ripoll | Casa 4 manzana A | `5492644124325` | 17/10/2026, 08:39 p. m. hs |
 | **622** | Mariela garcia | Mc c14 | `5492644516492` | 17/10/2026, 12:19 p. m. hs |
 | **627** | Estela navas | Me | `5492644183926` | 17/10/2026, 01:17 p. m. hs |
 | **629** | Juan ginestar | Mb c4 | `5492644819740` | 17/10/2026, 09:42 a. m. hs |
@@ -233,6 +241,7 @@
 | **714** | Daniela Elisa Andreoni López | Barrio Carolina 2 Manzana C casa 14 | `5492646317735` | 07/10/2026, 10:59 p. m. hs |
 | **717** | Gimeno | Mb c8 | `5492646622648` | 17/10/2026, 07:24 p. m. hs |
 | **719** | Mariela bustos | Mec21 | `5492644831797` | 13/10/2026, 10:46 p. m. hs |
+| **747** | Rodriguez Maria Isabel | Barrio Carolina II Mza A Casa 21 | `5492644050666` | 17/10/2026, 08:10 p. m. hs |
 | **748** | Juan ginestar | Mb c4 | `5492644819740` | 17/10/2026, 09:43 a. m. hs |
 | **759** | Gimeno | Mb c8 | `5492646622648` | 17/10/2026, 07:24 p. m. hs |
 | **765** | Paola Pérez | B Carolina casa 2 | `5492644147345` | 17/10/2026, 07:18 p. m. hs |
@@ -240,6 +249,8 @@
 | **768** | Estela navas | Me | `5492644183926` | 17/10/2026, 01:17 p. m. hs |
 | **777** | Valeria montes | Barrio Carolina II mz e casa 25 | `5492644133389` | 07/10/2026, 11:28 a. m. hs |
 | **798** | Lorena Guarneri | Av. Paula A. de Sarmiento 753 (sur) | `158394266714332` | 05/10/2026, 09:45 p. m. hs |
+| **800** | Daniela Elisa Andreoni López | Barrio Carolina 2 Manzana C casa 14 | `5492646317735` | 17/10/2026, 08:55 p. m. hs |
+| **812** | Galdeano Rodríguez Pablo Federico | Barrio Carolina II mza A Casa 21 | `5492644050666` | 17/10/2026, 08:14 p. m. hs |
 | **823** | Victoria | Mb c9 | `5492645417522` | 17/10/2026, 03:00 p. m. hs |
 | **839** | Estela navas | Me | `5492644183926` | 17/10/2026, 01:17 p. m. hs |
 | **845** | Gladys Rubiño | 9 de julio 295 sur Rawson | `5492644752023` | 04/10/2026, 07:21 p. m. hs |
